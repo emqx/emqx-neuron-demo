@@ -1,0 +1,187 @@
+name: erp-mes-plc-demo
+
+x-plc-env: &plc-env
+  ENTERPRISE: acme-mfg
+  SITE: plant-1
+  AREA: machining
+  LINE: line-1
+  MQTT_HOST: emqx
+  MQTT_PORT: "1883"
+
+x-plc: &plc
+  build:
+    context: ./services/plc-sim
+  restart: unless-stopped
+  depends_on:
+    emqx:
+      condition: service_healthy
+  networks:
+    - demo
+
+x-neuron: &neuron
+  image: emqx/neuronex:latest
+  restart: unless-stopped
+  environment:
+    - LOG_CONSOLE=1
+  depends_on:
+    emqx:
+      condition: service_healthy
+  networks:
+    - demo
+
+services:
+  emqx:
+    image: emqx/emqx:6.2.0
+    container_name: emqx
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      - "18083:18083"
+    environment:
+      EMQX_DASHBOARD__DEFAULT_USERNAME: admin
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: admin
+      EMQX_AUTHORIZATION__NO_MATCH: allow
+    volumes:
+      - ./emqx/base.hocon:/opt/emqx/etc/base.hocon:ro
+    healthcheck:
+      test: ["CMD", "emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - demo
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    container_name: timescaledb
+    environment:
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+      POSTGRES_DB: demo
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+      - ./timescale/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - demo
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - timescaledb
+    networks:
+      - demo
+
+  mes:
+    build:
+      context: ./services/mes-sim
+    container_name: mes
+    hostname: mes
+    environment:
+      ENTERPRISE: acme-mfg
+      SITE: plant-1
+      AREA: machining
+      LINE: line-1
+      MQTT_HOST: emqx
+      MQTT_PORT: "1883"
+      PORT: "8090"
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+    depends_on:
+      emqx:
+        condition: service_healthy
+    networks:
+      - demo
+
+  operator:
+    build:
+      context: ./services/operator
+    container_name: operator
+    hostname: operator
+    environment:
+      ENTERPRISE: acme-mfg
+      SITE: plant-1
+      AREA: machining
+      MQTT_HOST: emqx
+      MQTT_PORT: "1883"
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    depends_on:
+      emqx:
+        condition: service_healthy
+    networks:
+      - demo
+
+  plc-1:
+    <<: *plc
+    container_name: plc-1
+    hostname: plc-1
+    environment:
+      <<: *plc-env
+      PLC_ID: plc-1
+      AXIS_ID: axis-01
+  plc-2:
+    <<: *plc
+    container_name: plc-2
+    hostname: plc-2
+    environment:
+      <<: *plc-env
+      PLC_ID: plc-2
+      AXIS_ID: axis-01
+  plc-3:
+    <<: *plc
+    container_name: plc-3
+    hostname: plc-3
+    environment:
+      <<: *plc-env
+      PLC_ID: plc-3
+      AXIS_ID: axis-01
+
+  neuron-1:
+    <<: *neuron
+    container_name: neuron-1
+    hostname: neuron-1
+    ports: ["8085:8085"]
+    volumes:
+      - neuron-1-data:/opt/neuronex/data
+  neuron-2:
+    <<: *neuron
+    container_name: neuron-2
+    hostname: neuron-2
+    ports: ["8086:8085"]
+    volumes:
+      - neuron-2-data:/opt/neuronex/data
+  neuron-3:
+    <<: *neuron
+    container_name: neuron-3
+    hostname: neuron-3
+    ports: ["8087:8085"]
+    volumes:
+      - neuron-3-data:/opt/neuronex/data
+
+networks:
+  demo:
+    driver: bridge
+
+volumes:
+  timescale-data:
+  grafana-data:
+  neuron-1-data:
+  neuron-2-data:
+  neuron-3-data:

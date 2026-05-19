@@ -1,0 +1,262 @@
+{
+  "title": "Production Overview · PLC Fleet",
+  "uid": "production-overview",
+  "schemaVersion": 38,
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "2s",
+  "time": {
+    "from": "now-5m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "plc-1",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"idle":      {"color": "text",   "index": 0}}},
+            {"type": "value", "options": {"running":   {"color": "blue",   "index": 1}}},
+            {"type": "value", "options": {"holding":   {"color": "yellow", "index": 2}}},
+            {"type": "value", "options": {"faulted":   {"color": "red",    "index": 3}}},
+            {"type": "value", "options": {"completed": {"color": "green",  "index": 4}}},
+            {"type": "value", "options": {"aborted":   {"color": "orange", "index": 5}}}
+          ],
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}
+        }
+      },
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["last"], "fields": "/.*/", "values": false}
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT state FROM plc_telemetry WHERE plc_id = 'plc-1' ORDER BY ts DESC LIMIT 1",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "plc-2",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 4, "w": 8, "x": 8, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"idle":      {"color": "text",   "index": 0}}},
+            {"type": "value", "options": {"running":   {"color": "blue",   "index": 1}}},
+            {"type": "value", "options": {"holding":   {"color": "yellow", "index": 2}}},
+            {"type": "value", "options": {"faulted":   {"color": "red",    "index": 3}}},
+            {"type": "value", "options": {"completed": {"color": "green",  "index": 4}}},
+            {"type": "value", "options": {"aborted":   {"color": "orange", "index": 5}}}
+          ],
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}
+        }
+      },
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["last"], "fields": "/.*/", "values": false}
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT state FROM plc_telemetry WHERE plc_id = 'plc-2' ORDER BY ts DESC LIMIT 1",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "plc-3",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 4, "w": 8, "x": 16, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"idle":      {"color": "text",   "index": 0}}},
+            {"type": "value", "options": {"running":   {"color": "blue",   "index": 1}}},
+            {"type": "value", "options": {"holding":   {"color": "yellow", "index": 2}}},
+            {"type": "value", "options": {"faulted":   {"color": "red",    "index": 3}}},
+            {"type": "value", "options": {"completed": {"color": "green",  "index": 4}}},
+            {"type": "value", "options": {"aborted":   {"color": "orange", "index": 5}}}
+          ],
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}
+        }
+      },
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["last"], "fields": "/.*/", "values": false}
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT state FROM plc_telemetry WHERE plc_id = 'plc-3' ORDER BY ts DESC LIMIT 1",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Spindle RPM",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "rotrpm",
+          "min": 0,
+          "max": 7000,
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5,
+            "pointSize": 3, "lineInterpolation": "linear"
+          }
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT ts AS time, plc_id AS metric, spindle_rpm AS value FROM plc_telemetry WHERE $__timeFilter(ts) ORDER BY ts",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Feed rate",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 600,
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5,
+            "pointSize": 3, "lineInterpolation": "linear",
+            "axisLabel": "mm/min"
+          }
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT ts AS time, plc_id AS metric, feed_mm_min AS value FROM plc_telemetry WHERE $__timeFilter(ts) ORDER BY ts",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Coolant temperature",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "min": 15,
+          "max": 70,
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5,
+            "pointSize": 3, "lineInterpolation": "linear",
+            "thresholdsStyle": {"mode": "dashed"}
+          },
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green",  "value": null},
+              {"color": "yellow", "value": 45},
+              {"color": "red",    "value": 55}
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT ts AS time, plc_id AS metric, coolant_temp_c AS value FROM plc_telemetry WHERE $__timeFilter(ts) ORDER BY ts",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Spindle torque",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 35,
+          "decimals": 1,
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10,
+            "pointSize": 3, "lineInterpolation": "linear",
+            "axisLabel": "N·m"
+          }
+        }
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT ts AS time, plc_id AS metric, torque_nm AS value FROM plc_telemetry WHERE $__timeFilter(ts) ORDER BY ts",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Recent batches",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 20},
+      "fieldConfig": {
+        "defaults": {"custom": {"align": "left"}},
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "state"},
+            "properties": [
+              {"id": "custom.cellOptions", "value": {"type": "color-background"}},
+              {
+                "id": "mappings",
+                "value": [
+                  {"type": "value", "options": {"running":   {"color": "blue",  "index": 0}}},
+                  {"type": "value", "options": {"completed": {"color": "green", "index": 1}}},
+                  {"type": "value", "options": {"failed":    {"color": "red",   "index": 2}}}
+                ]
+              },
+              {"id": "color", "value": {"mode": "thresholds"}},
+              {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}}
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT batch_id, plc_id, recipe_id, state, part_serial, started_at, completed_at, fail_reason FROM batches ORDER BY COALESCE(completed_at, started_at) DESC NULLS LAST LIMIT 25",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    }
+  ]
+}

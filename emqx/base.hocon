@@ -1,0 +1,209 @@
+connectors {
+  timescale {
+    demo {
+      server = timescaledb
+      username = demo
+      database = demo
+      password = demo
+      enable = true
+    }
+  }
+}
+
+actions {
+  timescale {
+    plc_telemetry {
+      connector = demo
+      enable = true
+      parameters {
+        sql = "insert into plc_telemetry(ts, plc_id, axis_id, spindle_rpm, feed_mm_min, coolant_temp_c, torque_nm, power_kw, state, raw) values (now(), ${payload.plc_id}, ${payload.axis_id}, ${payload.spindle_rpm}, ${payload.feed_mm_min}, ${payload.coolant_temp_c}, ${payload.torque_nm}, ${payload.power_kw}, ${payload.state}, ${payload})"
+      }
+    }
+    batches {
+      connector = demo
+      enable = true
+      parameters {
+        # NULLIF handles JSON nulls (which EMQX templates as the string
+        # "null") so nullable timestamptz / text columns parse correctly.
+        # Events live inside `raw` (full record JSONB) — query as
+        # raw->'events' if needed.
+        sql = "insert into batches(batch_id, order_id, recipe_id, plc_id, part_serial, state, started_at, completed_at, fail_reason, raw) values (${payload.batch_id}, ${payload.order_id}, ${payload.recipe_id}, ${payload.plc_id}, ${payload.part_serial}, ${payload.state}, NULLIF(${payload.started_at}, 'null')::timestamptz, NULLIF(${payload.completed_at}, 'null')::timestamptz, NULLIF(${payload.fail_reason}, 'null'), ${payload}) on conflict (batch_id) do update set state = excluded.state, completed_at = excluded.completed_at, fail_reason = excluded.fail_reason, raw = excluded.raw"
+      }
+    }
+  }
+}
+
+rule_engine {
+  ignore_sys_message = true
+  rules {
+
+    # Telemetry → Timescale historian.
+    # Topic shape: <enterprise>/<site>/<area>/<line>/<plc>/telemetry
+    store_plc_telemetry {
+      enable = true
+      name   = "store_plc_telemetry"
+      sql    = """~
+        SELECT
+          payload.values AS payload
+        FROM
+          "+/+/+/+/+/telemetry"~"""
+      actions = ["timescale:plc_telemetry"]
+    }
+
+    # Batch records → Postgres (same connector as Timescale). Upserts on
+    # batch_id so progress updates from MES (running → completed/failed)
+    # land on the same row.
+    # Topic shape: <enterprise>/<site>/batches/<batch_id>/record
+    store_batches {
+      enable = true
+      name   = "store_batches"
+      sql    = """~
+        SELECT
+          payload AS payload
+        FROM
+          "+/+/batches/+/record"~"""
+      actions = ["timescale:batches"]
+    }
+
+    # MES publishes phase command (JSON) → reshape to EMQX Neuron write-req
+    # JSON, republish on the PLC's neuron's write-req topic. Neuron
+    # writes the four command tags via OPC UA.
+    # Topic shape: <enterprise>/<site>/<area>/<line>/<plc>/batch/<bid>/phase/<p>/command
+    phase_command_to_neuron {
+      enable = true
+      name   = "phase_command_to_neuron"
+      sql    = """~
+        SELECT
+          payload.plc_id    AS plc,
+          payload.action    AS action,
+          payload.phase     AS phase,
+          payload.batch_id  AS batch_id,
+          timestamp         AS seq
+        FROM
+          "+/+/+/+/+/batch/+/phase/+/command"~"""
+      actions = [
+        {
+          function = republish
+          args {
+            topic = "/neuron/${plc}/write/req"
+            qos   = 1
+            payload = """{"uuid":"${seq}","node":"src-opcua","group":"plc","tags":[{"tag":"command_batch_id","value":"${batch_id}"},{"tag":"command_phase","value":"${phase}"},{"tag":"command_action","value":"${action}"},{"tag":"command_seq","value":"${seq}"}]}"""
+          }
+        }
+      ]
+    }
+
+    # Operator publishes _demo/fault/<plc> (JSON) → reshape to EMQX Neuron
+    # write-req JSON for fault tags. plc_id extracted from topic.
+    fault_to_neuron {
+      enable = true
+      name   = "fault_to_neuron"
+      sql    = """~
+        SELECT
+          nth(3, tokens(topic, '/')) AS plc,
+          payload.action             AS action,
+          payload.type               AS ftype,
+          timestamp                  AS seq
+        FROM
+          "_demo/fault/+"~"""
+      actions = [
+        {
+          function = republish
+          args {
+            topic = "/neuron/${plc}/write/req"
+            qos   = 1
+            payload = """{"uuid":"${seq}","node":"src-opcua","group":"plc","tags":[{"tag":"fault_action","value":"${action}"},{"tag":"fault_type","value":"${ftype}"},{"tag":"fault_seq","value":"${seq}"}]}"""
+          }
+        }
+      ]
+    }
+
+    # Synthesize per-PLC retained state from on-change state-events (rather
+    # than from 1 Hz telemetry), so the retained `<plc>/state` message only
+    # rewrites on real transitions. The PLC writes phase_event_json on every
+    # state change including idle ones; Neuron's events driver subscribes to
+    # that OPC UA tag in mode 2 and emits one MQTT message per transition.
+    # Topic shape: <enterprise>/<site>/<area>/<line>/<plc>/state-events
+    #   nth(1)=enterprise  nth(2)=site  nth(3)=area
+    #   nth(4)=line        nth(5)=plc   nth(6)=state-events
+    synthesize_plc_state {
+      enable = true
+      name   = "synthesize_plc_state"
+      sql    = """~
+        SELECT
+          nth(1, tokens(topic, '/'))                   AS enterprise,
+          nth(2, tokens(topic, '/'))                   AS site,
+          nth(3, tokens(topic, '/'))                   AS area,
+          nth(4, tokens(topic, '/'))                   AS line,
+          nth(5, tokens(topic, '/'))                   AS plc,
+          json_decode(payload.values.phase_event_json) AS evt,
+          timestamp                                    AS seq
+        FROM
+          "+/+/+/+/+/state-events"
+        WHERE
+          payload.values.phase_event_json <> ''~"""
+      actions = [
+        {
+          function = republish
+          args {
+            topic   = "${enterprise}/${site}/${area}/${line}/${plc}/state"
+            qos     = 1
+            retain  = true
+            payload = """{"state":"${evt.state}","plc_id":"${plc}","batch_id":"${evt.batch_id}","phase":"${evt.phase}","reason":"${evt.reason}","ts":"${seq}"}"""
+          }
+        }
+      ]
+    }
+
+    # Fan out the bundled telemetry JSON into per-tag retained topics so the
+    # UNS view (and any consumer that only cares about one scalar) sees each
+    # measurement as its own leaf. The bundled <plc>/telemetry topic is kept
+    # intact so the historian rule and any snapshot consumer still works.
+    # Topic shape (output): <enterprise>/<site>/<area>/<line>/<plc>/telemetry/<tag>
+    # Payload (output):     {"value": <number>, "ts": <epoch_ms>}
+    explode_plc_telemetry {
+      enable = true
+      name   = "explode_plc_telemetry"
+      sql    = """~
+        SELECT
+          nth(1, tokens(topic, '/'))    AS enterprise,
+          nth(2, tokens(topic, '/'))    AS site,
+          nth(3, tokens(topic, '/'))    AS area,
+          nth(4, tokens(topic, '/'))    AS line,
+          nth(5, tokens(topic, '/'))    AS plc,
+          payload.values.spindle_rpm    AS spindle_rpm,
+          payload.values.feed_mm_min    AS feed_mm_min,
+          payload.values.coolant_temp_c AS coolant_temp_c,
+          payload.values.torque_nm      AS torque_nm,
+          payload.values.power_kw       AS power_kw,
+          payload.timestamp             AS ts
+        FROM
+          "+/+/+/+/+/telemetry"
+        WHERE
+          payload.values.plc_id <> ''~"""
+      actions = [
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${plc}/telemetry/spindle_rpm"
+                 qos = 0  retain = true
+                 payload = """{"value":${spindle_rpm},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${plc}/telemetry/feed_mm_min"
+                 qos = 0  retain = true
+                 payload = """{"value":${feed_mm_min},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${plc}/telemetry/coolant_temp_c"
+                 qos = 0  retain = true
+                 payload = """{"value":${coolant_temp_c},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${plc}/telemetry/torque_nm"
+                 qos = 0  retain = true
+                 payload = """{"value":${torque_nm},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${plc}/telemetry/power_kw"
+                 qos = 0  retain = true
+                 payload = """{"value":${power_kw},"ts":${ts}}""" } }
+      ]
+    }
+
+  }
+}

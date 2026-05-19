@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Live UNS · ERP ↔ MES ↔ PLC Demo</title>
+  <style>
+    :root { --bg:#f3f5f7; --card:#ffffff; --line:#d8dde3; --muted:#5a6473;
+            --fg:#1a2330; --accent:#2563eb; --good:#16a34a; --warn:#d97706;
+            --bad:#dc2626; }
+    * { box-sizing: border-box; }
+    body { background:var(--bg); color:var(--fg); margin:0;
+           font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+           line-height:1.45; }
+    header { padding:14px 24px; border-bottom:1px solid var(--line);
+             background:var(--card);
+             display:flex; justify-content:space-between; align-items:center; }
+    h1 { font-size:14px; letter-spacing:.18em; margin:0; font-weight:600; }
+    h1 a { color:inherit; text-decoration:none; }
+    .right { font-size:11px; color:var(--muted); letter-spacing:.06em; }
+    .right .dot { display:inline-block; width:8px; height:8px; border-radius:50%;
+                  background:var(--muted); margin-right:6px; vertical-align:middle; }
+    .right .dot.on   { background:var(--good); }
+    .right .dot.off  { background:var(--bad); }
+    .right .dot.warn { background:var(--warn); }
+    main { padding:18px 24px; max-width:1100px; margin:0 auto; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:6px;
+            padding:14px 18px; }
+    .meta { font-size:11px; color:var(--muted); margin-bottom:14px;
+            letter-spacing:.04em; }
+    .meta code { background:#f8f9fb; padding:1px 5px; border-radius:3px;
+                 border:1px solid var(--line); font-size:11px; }
+    .tree { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+    details { padding-left:14px; border-left:1px solid var(--line); margin:1px 0; }
+    summary { cursor:pointer; padding:1px 0 1px 4px; user-select:none;
+              list-style:none; }
+    summary::-webkit-details-marker { display:none; }
+    summary::before { content:'▾'; display:inline-block; width:12px;
+                      color:var(--muted); font-size:10px; }
+    details:not([open]) > summary::before { content:'▸'; }
+    summary .seg-name { color:var(--fg); }
+    summary .count    { color:var(--muted); margin-left:8px; font-size:11px; }
+    .leaf { padding:1px 0 1px 18px; border-left:1px solid var(--line);
+            margin:1px 0; cursor:pointer; }
+    .leaf:hover { background:#f8f9fb; }
+    .leaf .seg     { color:var(--accent); }
+    .leaf .self    { color:var(--muted); font-style:italic; }
+    .leaf .preview { color:var(--muted); margin-left:10px;
+                     overflow:hidden; text-overflow:ellipsis;
+                     display:inline-block; max-width:60%;
+                     white-space:nowrap; vertical-align:bottom; }
+    .leaf .age     { color:var(--muted); font-size:10.5px; margin-left:10px;
+                     font-style:italic; }
+    .leaf .full    { display:none; margin:6px 0 8px 14px;
+                     padding:8px 10px; border-radius:4px; background:#f8f9fb;
+                     border:1px solid var(--line); white-space:pre-wrap;
+                     word-break:break-all; max-height:300px; overflow:auto;
+                     color:var(--fg); font-size:11.5px; cursor:text; }
+    .leaf.open .full { display:block; }
+    .empty { color:var(--muted); padding:14px 0; font-family:inherit; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><a href="/">← LIVE UNS</a></h1>
+    <span class="right">
+      <span id="dot" class="dot"></span>
+      <span id="status">connecting…</span>
+      <span style="margin-left:14px;"><span id="msg-count">0</span> msgs · <span id="topic-count">0</span> topics</span>
+    </span>
+  </header>
+  <main>
+    <div class="card">
+      <div class="meta">
+        Subscribed to <code>acme-mfg/+/orders/#</code>, <code>acme-mfg/+/batches/#</code>, <code>acme-mfg/+/+/+/+/state</code>, <code>acme-mfg/+/+/+/+/state-events</code>, <code>acme-mfg/+/+/+/+/telemetry/+</code>, <code>_demo/#</code>, <code>/neuron/#</code> · MQTT over WebSocket → <code id="ws-url">ws://…:8083/mqtt</code> · click any topic row to expand the full payload
+      </div>
+      <div id="tree" class="tree">
+        <div class="empty">No messages yet.</div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://unpkg.com/mqtt@5.10.4/dist/mqtt.min.js"></script>
+  <script>
+    const wsHost = location.hostname || 'localhost';
+    const wsUrl = `ws://${wsHost}:8083/mqtt`;
+    document.getElementById('ws-url').textContent = wsUrl;
+
+    // Tree: root.children: Map<segment, node>
+    // node = {children: Map, fullTopic, payload?, ts?}
+    const root = {children: new Map(), fullTopic: ''};
+    let msgCount = 0;
+
+    function getNode(topic) {
+      const segs = topic.split('/');
+      let node = root;
+      const path = [];
+      for (const s of segs) {
+        path.push(s);
+        if (!node.children.has(s)) {
+          node.children.set(s, {children: new Map(), fullTopic: path.join('/')});
+        }
+        node = node.children.get(s);
+      }
+      return node;
+    }
+
+    function countLeaves(n) {
+      let c = (n.payload !== undefined) ? 1 : 0;
+      for (const x of n.children.values()) c += countLeaves(x);
+      return c;
+    }
+
+    function previewOf(payload) {
+      const s = payload.length > 140 ? payload.slice(0, 140) + '…' : payload;
+      return s.replace(/\s+/g, ' ');
+    }
+
+    function ageString(ts) {
+      const d = (Date.now() - ts) / 1000;
+      if (d < 1)    return 'just now';
+      if (d < 60)   return d.toFixed(1) + 's ago';
+      if (d < 3600) return Math.floor(d / 60) + 'm ago';
+      return Math.floor(d / 3600) + 'h ago';
+    }
+
+    function prettyJson(s) {
+      try { return JSON.stringify(JSON.parse(s), null, 2); }
+      catch { return s; }
+    }
+
+    function makeSpan(cls, text) {
+      const el = document.createElement('span');
+      el.className = cls;
+      el.textContent = text;
+      return el;
+    }
+
+    function renderNode(node, name, container) {
+      const hasChildren = node.children.size > 0;
+      const isLeaf = node.payload !== undefined;
+      if (hasChildren) {
+        const det = document.createElement('details');
+        det.dataset.path = node.fullTopic;
+        det.open = true;
+        const sum = document.createElement('summary');
+        sum.appendChild(makeSpan('seg-name', name));
+        sum.appendChild(makeSpan('count', countLeaves(node)));
+        det.appendChild(sum);
+        for (const [childName, child] of [...node.children.entries()].sort()) {
+          renderNode(child, childName, det);
+        }
+        container.appendChild(det);
+        // Node with both children AND its own payload — show the payload inline.
+        if (isLeaf) appendLeaf(node, '(self)', det, true);
+      } else if (isLeaf) {
+        appendLeaf(node, name, container, false);
+      }
+    }
+
+    function appendLeaf(node, name, container, isSelf) {
+      const div = document.createElement('div');
+      div.className = 'leaf';
+      div.dataset.topic = node.fullTopic;
+      div.appendChild(makeSpan(isSelf ? 'self' : 'seg', name));
+      div.appendChild(makeSpan('preview', previewOf(node.payload)));
+      div.appendChild(makeSpan('age', ageString(node.ts)));
+      const full = document.createElement('div');
+      full.className = 'full';
+      full.textContent = prettyJson(node.payload);
+      div.appendChild(full);
+      div.addEventListener('click', e => {
+        // Allow text selection inside the expanded JSON pane.
+        if (e.target.closest('.full')) return;
+        div.classList.toggle('open');
+      });
+      container.appendChild(div);
+    }
+
+    function render() {
+      const tree = document.getElementById('tree');
+      // Preserve user-collapsed branches, user-opened leaf panes, and the
+      // scroll position inside each open .full pane so a tick-driven rerender
+      // doesn't reset what the user was reading.
+      const closed = new Set();
+      tree.querySelectorAll('details:not([open])').forEach(d => closed.add(d.dataset.path));
+      const opened = new Map();
+      tree.querySelectorAll('.leaf.open').forEach(l => {
+        const full = l.querySelector('.full');
+        opened.set(l.dataset.topic, full ? full.scrollTop : 0);
+      });
+
+      tree.replaceChildren();
+      if (root.children.size === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = 'No messages yet.';
+        tree.appendChild(empty);
+      } else {
+        for (const [name, child] of [...root.children.entries()].sort()) {
+          renderNode(child, name, tree);
+        }
+      }
+
+      tree.querySelectorAll('details').forEach(d => {
+        if (closed.has(d.dataset.path)) d.open = false;
+      });
+      tree.querySelectorAll('.leaf').forEach(l => {
+        if (opened.has(l.dataset.topic)) {
+          l.classList.add('open');
+          const full = l.querySelector('.full');
+          if (full) full.scrollTop = opened.get(l.dataset.topic);
+        }
+      });
+
+      document.getElementById('topic-count').textContent = countLeaves(root);
+    }
+
+    setInterval(render, 500);
+
+    function setStatus(label, state) {
+      document.getElementById('status').textContent = label;
+      document.getElementById('dot').className = 'dot' + (state ? ' ' + state : '');
+    }
+
+    setStatus('connecting…', 'warn');
+    const client = mqtt.connect(wsUrl, {
+      clientId: 'uns-viewer-' + Math.random().toString(16).slice(2, 8),
+      clean: true,
+      reconnectPeriod: 2000,
+    });
+    client.on('connect',   () => {
+      setStatus('connected', 'on');
+      client.subscribe([
+        'acme-mfg/+/orders/#',
+        'acme-mfg/+/batches/#',
+        'acme-mfg/+/+/+/+/state',
+        'acme-mfg/+/+/+/+/state-events',
+        'acme-mfg/+/+/+/+/telemetry/+',
+        '_demo/#',
+        '/neuron/#',
+      ], {qos: 0});
+    });
+    client.on('reconnect', () => setStatus('reconnecting…', 'warn'));
+    client.on('close',     () => setStatus('disconnected', 'off'));
+    client.on('error',     e  => setStatus('error: ' + (e.message || e), 'off'));
+    client.on('message',   (topic, payload) => {
+      msgCount++;
+      document.getElementById('msg-count').textContent = msgCount;
+      const node = getNode(topic);
+      node.payload = payload.toString();
+      node.ts = Date.now();
+    });
+  </script>
+</body>
+</html>

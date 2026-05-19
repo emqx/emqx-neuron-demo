@@ -1,0 +1,10 @@
+apiVersion: 1
+
+providers:
+  - name: "Production Overview"
+    type: file
+    folder: "ERP-MES-PLC Demo"
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards
