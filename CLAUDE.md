@@ -29,9 +29,12 @@ Two EMQX Neuron drivers per neuron point at the same PLC endpoint:
   `phase_event_json` only. Server-pushed on change, publishes to
   `.../state-events`. MES subscribes here directly.
 
-Commands flow MES → MQTT phase-cmd topic → EMQX rule → `/neuron/<plc>/write/req`
-→ Neuron OPC UA write → PLC polls its own command_seq tag and reacts.
-Same path for fault inject/clear via `_demo/fault/<plc>`.
+Commands flow MES → MQTT phase-cmd topic → EMQX rule →
+`<ent>/<site>/<area>/<line>/<plc>/cmd/req` → Neuron OPC UA write → PLC polls
+its own command_seq tag and reacts. Same path for fault inject/clear: the
+operator publishes to `<ent>/<site>/<area>/<line>/<plc>/_demo/fault` and the
+fault-to-neuron rule reshapes onto the same `cmd/req` topic. Neuron's write
+response lands on `cmd/ack` (no consumer today; kept for visibility).
 
 The MQTT→OPC UA write step is **not a EMQX Neuron rule** — it's built into the
 MQTT north app. Setting the app's `write-req-topic` / `write-resp-topic`
@@ -88,11 +91,12 @@ RECIPES) plus the DB column list and the Grafana panels.
   Select it explicitly: `SELECT ..., timestamp AS seq` then use `${seq}`.
 - **JSON arrays can't be bound directly to JSONB.** Store the whole
   payload once via `${payload}` and query nested fields with `raw->'x'`.
-- **`nth()` indices on the new 6-segment telemetry topic**:
+- **`nth()` indices on the 6-segment telemetry topic**:
   nth(1)=enterprise, nth(2)=site, nth(3)=area, nth(4)=line, nth(5)=plc,
-  nth(6)=`telemetry`. The phase-command topic is 10 segments; the plc
-  segment is still nth(5). The fault topic stays `_demo/fault/<plc>` so
-  plc is nth(3) there.
+  nth(6)=`telemetry`. All wire topics now share this ISA-95 prefix
+  (telemetry, state, state-events, cmd/req, cmd/ack, _demo/fault), so the
+  same `nth(1..5)` extraction works in every rule. The phase-command topic
+  is 10 segments; plc is still nth(5).
 
 ## Grafana 12 dashboard quirks
 

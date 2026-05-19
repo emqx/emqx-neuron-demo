@@ -71,7 +71,7 @@
   <main>
     <div class="card">
       <div class="meta">
-        Subscribed to <code>acme-mfg/+/orders/#</code>, <code>acme-mfg/+/batches/#</code>, <code>acme-mfg/+/+/+/+/state</code>, <code>acme-mfg/+/+/+/+/state-events</code>, <code>acme-mfg/+/+/+/+/telemetry/+</code>, <code>_demo/#</code>, <code>/neuron/#</code> · MQTT over WebSocket → <code id="ws-url">ws://…:8083/mqtt</code> · click any topic row to expand the full payload
+        Subscribed to <code>acme-mfg/+/orders/#</code>, <code>acme-mfg/+/batches/#</code>, <code>acme-mfg/+/+/+/+/state</code>, <code>acme-mfg/+/+/+/+/state-events</code>, <code>acme-mfg/+/+/+/+/telemetry/+</code>, <code>acme-mfg/+/+/+/+/cmd/+</code>, <code>acme-mfg/+/+/+/+/_demo/fault</code> · MQTT over WebSocket → <code id="ws-url">ws://…:8083/mqtt</code> · click any topic row to expand the full payload
       </div>
       <div id="tree" class="tree">
         <div class="empty">No messages yet.</div>
@@ -236,8 +236,8 @@
         'acme-mfg/+/+/+/+/state',
         'acme-mfg/+/+/+/+/state-events',
         'acme-mfg/+/+/+/+/telemetry/+',
-        '_demo/#',
-        '/neuron/#',
+        'acme-mfg/+/+/+/+/cmd/+',
+        'acme-mfg/+/+/+/+/_demo/fault',
       ], {qos: 0});
     });
     client.on('reconnect', () => setStatus('reconnecting…', 'warn'));

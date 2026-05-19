@@ -213,8 +213,8 @@ def provision(n: dict) -> None:
                 "ssl": False, "qos": 1, "version": 5, "format": 0,
                 "cache": False, "cache-mem-size": 0, "cache-disk-size": 0,
                 "cache-sync-interval": 100,
-                "write-req-topic":  f"/neuron/{n['plc_id']}/write/req",
-                "write-resp-topic": f"/neuron/{n['plc_id']}/write/resp",
+                "write-req-topic":  f"{n['enterprise']}/{n['site']}/{n['area']}/{n['line']}/{n['plc_id']}/cmd/req",
+                "write-resp-topic": f"{n['enterprise']}/{n['site']}/{n['area']}/{n['line']}/{n['plc_id']}/cmd/ack",
             },
         })
 

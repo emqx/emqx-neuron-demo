@@ -29,6 +29,7 @@ import paho.mqtt.client as mqtt
 ENTERPRISE = os.getenv("ENTERPRISE", "acme-mfg")
 SITE       = os.getenv("SITE", "plant-1")
 AREA       = os.getenv("AREA", "machining")
+LINE       = os.getenv("LINE", "line-1")
 MQTT_HOST  = os.getenv("MQTT_HOST", "emqx")
 MQTT_PORT  = int(os.getenv("MQTT_PORT", "1883"))
 PORT       = int(os.getenv("PORT", "8080"))
@@ -147,7 +148,7 @@ def api_fault():
         return jsonify({"error": "action must be 'inject' or 'clear'"}), 400
     if not plc_id:
         return jsonify({"error": "plc_id required"}), 400
-    topic = f"_demo/fault/{plc_id}"
+    topic = f"{ENTERPRISE}/{SITE}/{AREA}/{LINE}/{plc_id}/_demo/fault"
     payload = {"action": action, "type": ftype, "ts": utc_now()}
     client.publish(topic, json.dumps(payload), qos=1)
     return jsonify({"status": "ok", "topic": topic, "action": action})

@@ -116,6 +116,7 @@ services:
       ENTERPRISE: acme-mfg
       SITE: plant-1
       AREA: machining
+      LINE: line-1
       MQTT_HOST: emqx
       MQTT_PORT: "1883"
       PORT: "8080"

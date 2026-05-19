@@ -66,26 +66,31 @@ rule_engine {
     }
 
     # MES publishes phase command (JSON) → reshape to EMQX Neuron write-req
-    # JSON, republish on the PLC's neuron's write-req topic. Neuron
-    # writes the four command tags via OPC UA.
+    # JSON, republish on the PLC's neuron's cmd/req topic. Neuron writes the
+    # four command tags via OPC UA. Enterprise/site/area/line all extracted
+    # from the source topic so the rule has no hardcoded namespace.
     # Topic shape: <enterprise>/<site>/<area>/<line>/<plc>/batch/<bid>/phase/<p>/command
     phase_command_to_neuron {
       enable = true
       name   = "phase_command_to_neuron"
       sql    = """~
         SELECT
-          payload.plc_id    AS plc,
-          payload.action    AS action,
-          payload.phase     AS phase,
-          payload.batch_id  AS batch_id,
-          timestamp         AS seq
+          nth(1, tokens(topic, '/')) AS enterprise,
+          nth(2, tokens(topic, '/')) AS site,
+          nth(3, tokens(topic, '/')) AS area,
+          nth(4, tokens(topic, '/')) AS line,
+          nth(5, tokens(topic, '/')) AS plc,
+          payload.action             AS action,
+          payload.phase              AS phase,
+          payload.batch_id           AS batch_id,
+          timestamp                  AS seq
         FROM
           "+/+/+/+/+/batch/+/phase/+/command"~"""
       actions = [
         {
           function = republish
           args {
-            topic = "/neuron/${plc}/write/req"
+            topic = "${enterprise}/${site}/${area}/${line}/${plc}/cmd/req"
             qos   = 1
             payload = """{"uuid":"${seq}","node":"src-opcua","group":"plc","tags":[{"tag":"command_batch_id","value":"${batch_id}"},{"tag":"command_phase","value":"${phase}"},{"tag":"command_action","value":"${action}"},{"tag":"command_seq","value":"${seq}"}]}"""
           }
@@ -93,24 +98,30 @@ rule_engine {
       ]
     }
 
-    # Operator publishes _demo/fault/<plc> (JSON) → reshape to EMQX Neuron
-    # write-req JSON for fault tags. plc_id extracted from topic.
+    # Operator publishes <plc>/_demo/fault (JSON) → reshape to EMQX Neuron
+    # write-req JSON for fault tags. Same namespace-from-topic pattern as
+    # phase_command_to_neuron above.
+    # Topic shape: <enterprise>/<site>/<area>/<line>/<plc>/_demo/fault
     fault_to_neuron {
       enable = true
       name   = "fault_to_neuron"
       sql    = """~
         SELECT
-          nth(3, tokens(topic, '/')) AS plc,
+          nth(1, tokens(topic, '/')) AS enterprise,
+          nth(2, tokens(topic, '/')) AS site,
+          nth(3, tokens(topic, '/')) AS area,
+          nth(4, tokens(topic, '/')) AS line,
+          nth(5, tokens(topic, '/')) AS plc,
           payload.action             AS action,
           payload.type               AS ftype,
           timestamp                  AS seq
         FROM
-          "_demo/fault/+"~"""
+          "+/+/+/+/+/_demo/fault"~"""
       actions = [
         {
           function = republish
           args {
-            topic = "/neuron/${plc}/write/req"
+            topic = "${enterprise}/${site}/${area}/${line}/${plc}/cmd/req"
             qos   = 1
             payload = """{"uuid":"${seq}","node":"src-opcua","group":"plc","tags":[{"tag":"fault_action","value":"${action}"},{"tag":"fault_type","value":"${ftype}"},{"tag":"fault_seq","value":"${seq}"}]}"""
           }
