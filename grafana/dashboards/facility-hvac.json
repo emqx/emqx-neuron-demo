@@ -1,0 +1,181 @@
+{
+  "title": "Facility · HVAC (BACnet)",
+  "uid": "facility-hvac",
+  "schemaVersion": 38,
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Unit",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"0": {"color": "text", "text": "off",      "index": 0}}},
+            {"type": "value", "options": {"1": {"color": "blue", "text": "running",  "index": 1}}}
+          ],
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}
+        }
+      },
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["last"], "fields": "/.*/", "values": false}
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT unit_running::text FROM hvac_telemetry WHERE hvac_id = 'hvac-1' ORDER BY ts DESC LIMIT 1",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Mode",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"1": {"color": "text",   "text": "off",     "index": 0}}},
+            {"type": "value", "options": {"2": {"color": "blue",   "text": "cooling", "index": 1}}},
+            {"type": "value", "options": {"3": {"color": "red",    "text": "heating", "index": 2}}},
+            {"type": "value", "options": {"4": {"color": "green",  "text": "fan",     "index": 3}}}
+          ],
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}
+        }
+      },
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["last"], "fields": "/.*/", "values": false}
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT mode_actual::text FROM hvac_telemetry WHERE hvac_id = 'hvac-1' ORDER BY ts DESC LIMIT 1",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Fault",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"type": "value", "options": {"0": {"color": "green", "text": "ok",     "index": 0}}},
+            {"type": "value", "options": {"1": {"color": "red",   "text": "fault",  "index": 1}}}
+          ],
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}
+        }
+      },
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["last"], "fields": "/.*/", "values": false}
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT fault_active::text FROM hvac_telemetry WHERE hvac_id = 'hvac-1' ORDER BY ts DESC LIMIT 1",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Setpoint",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "decimals": 1,
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}
+        }
+      },
+      "options": {
+        "colorMode": "background", "graphMode": "none", "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT temp_setpoint_c FROM hvac_telemetry WHERE hvac_id = 'hvac-1' ORDER BY ts DESC LIMIT 1",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Air temperatures",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 4},
+      "fieldConfig": {
+        "defaults": {"unit": "celsius", "custom": {"lineWidth": 2}}
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT ts AS time, 'supply' AS metric, supply_air_temp_c AS value FROM hvac_telemetry WHERE $__timeFilter(ts) AND hvac_id = 'hvac-1' UNION ALL SELECT ts AS time, 'return' AS metric, return_air_temp_c AS value FROM hvac_telemetry WHERE $__timeFilter(ts) AND hvac_id = 'hvac-1' UNION ALL SELECT ts AS time, 'outside' AS metric, outside_air_temp_c AS value FROM hvac_telemetry WHERE $__timeFilter(ts) AND hvac_id = 'hvac-1' UNION ALL SELECT ts AS time, 'setpoint' AS metric, temp_setpoint_c AS value FROM hvac_telemetry WHERE $__timeFilter(ts) AND hvac_id = 'hvac-1' ORDER BY time",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Chilled water & fan power",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 4},
+      "fieldConfig": {
+        "defaults": {"custom": {"lineWidth": 2}}
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT ts AS time, 'chilled_water_c' AS metric, chilled_water_temp_c AS value FROM hvac_telemetry WHERE $__timeFilter(ts) AND hvac_id = 'hvac-1' UNION ALL SELECT ts AS time, 'fan_kw' AS metric, fan_kw AS value FROM hvac_telemetry WHERE $__timeFilter(ts) AND hvac_id = 'hvac-1' ORDER BY time",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Filter pressure drop",
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 13},
+      "fieldConfig": {
+        "defaults": {"unit": "pressurepa", "custom": {"lineWidth": 2}}
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT ts AS time, hvac_id AS metric, filter_dp_pa AS value FROM hvac_telemetry WHERE $__timeFilter(ts) ORDER BY ts",
+          "refId": "A", "editorMode": "code", "rawQuery": true,
+          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
+        }
+      ]
+    }
+  ]
+}

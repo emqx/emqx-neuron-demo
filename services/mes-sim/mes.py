@@ -54,7 +54,7 @@ RECIPES: dict[str, list[str]] = {
     "program-quick": ["load", "rough", "unload"],
 }
 
-PLCS = [{"line": LINE, "id": f"plc-{i}"} for i in range(1, 6)]
+PLCS = [{"line": LINE, "id": f"plc-{i}"} for i in range(1, 3)]
 
 
 def utc_now() -> str:

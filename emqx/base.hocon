@@ -30,6 +30,16 @@ actions {
         sql = "insert into batches(batch_id, order_id, recipe_id, plc_id, part_serial, state, started_at, completed_at, fail_reason, raw) values (${payload.batch_id}, ${payload.order_id}, ${payload.recipe_id}, ${payload.plc_id}, ${payload.part_serial}, ${payload.state}, NULLIF(${payload.started_at}, 'null')::timestamptz, NULLIF(${payload.completed_at}, 'null')::timestamptz, NULLIF(${payload.fail_reason}, 'null'), ${payload}) on conflict (batch_id) do update set state = excluded.state, completed_at = excluded.completed_at, fail_reason = excluded.fail_reason, raw = excluded.raw"
       }
     }
+    hvac_telemetry {
+      connector = demo
+      enable = true
+      parameters {
+        # Neuron's BACnet driver mirrors the OPC UA shape: payload.values.*.
+        # BV booleans arrive as 0/1 ints — stored as SMALLINT to keep the
+        # rule SQL simple (EMQX's rule SQL doesn't allow `(x = 1) AS y`).
+        sql = "insert into hvac_telemetry(ts, hvac_id, supply_air_temp_c, return_air_temp_c, outside_air_temp_c, chilled_water_temp_c, fan_kw, filter_dp_pa, temp_setpoint_c, fan_speed_pct, mode_actual, unit_running, fault_active, raw) values (now(), ${hvac_id}, ${supply_air_temp_c}, ${return_air_temp_c}, ${outside_air_temp_c}, ${chilled_water_temp_c}, ${fan_kw}, ${filter_dp_pa}, ${temp_setpoint_c}, ${fan_speed_pct}, ${mode_actual}, ${unit_running}, ${fault_active}, ${payload})"
+      }
+    }
   }
 }
 
@@ -37,8 +47,11 @@ rule_engine {
   ignore_sys_message = true
   rules {
 
-    # Telemetry → Timescale historian.
-    # Topic shape: <enterprise>/<site>/<area>/<line>/<plc>/telemetry
+    # Telemetry → Timescale historian. Two source areas write to the same
+    # topic suffix; the WHERE clause routes only the machining ones here
+    # (hvac telemetry has a different tag shape and is handled by
+    # store_hvac_telemetry below).
+    # Topic shape: <enterprise>/<site>/machining/<line>/<plc>/telemetry
     store_plc_telemetry {
       enable = true
       name   = "store_plc_telemetry"
@@ -46,8 +59,35 @@ rule_engine {
         SELECT
           payload.values AS payload
         FROM
-          "+/+/+/+/+/telemetry"~"""
+          "+/+/machining/+/+/telemetry"~"""
       actions = ["timescale:plc_telemetry"]
+    }
+
+    # HVAC telemetry → Timescale historian.
+    # Topic shape: <enterprise>/<site>/utilities/<line>/<hvac>/telemetry
+    # Booleans arrive as 0/1 ints from the BACnet driver; the CAST coerces
+    # them into Postgres booleans cleanly.
+    store_hvac_telemetry {
+      enable = true
+      name   = "store_hvac_telemetry"
+      sql    = """~
+        SELECT
+          nth(5, tokens(topic, '/'))         AS hvac_id,
+          payload.values.supply_air_temp_c    AS supply_air_temp_c,
+          payload.values.return_air_temp_c    AS return_air_temp_c,
+          payload.values.outside_air_temp_c   AS outside_air_temp_c,
+          payload.values.chilled_water_temp_c AS chilled_water_temp_c,
+          payload.values.fan_kw               AS fan_kw,
+          payload.values.filter_dp_pa         AS filter_dp_pa,
+          payload.values.temp_setpoint_c      AS temp_setpoint_c,
+          payload.values.fan_speed_pct        AS fan_speed_pct,
+          payload.values.mode_actual          AS mode_actual,
+          payload.values.unit_running         AS unit_running,
+          payload.values.fault_active         AS fault_active,
+          payload.values                      AS payload
+        FROM
+          "+/+/utilities/+/+/telemetry"~"""
+      actions = ["timescale:hvac_telemetry"]
     }
 
     # Batch records → Postgres (same connector as Timescale). Upserts on
@@ -85,7 +125,7 @@ rule_engine {
           payload.batch_id           AS batch_id,
           timestamp                  AS seq
         FROM
-          "+/+/+/+/+/batch/+/phase/+/command"~"""
+          "+/+/machining/+/+/batch/+/phase/+/command"~"""
       actions = [
         {
           function = republish
@@ -116,7 +156,7 @@ rule_engine {
           payload.type               AS ftype,
           timestamp                  AS seq
         FROM
-          "+/+/+/+/+/_demo/fault"~"""
+          "+/+/machining/+/+/_demo/fault"~"""
       actions = [
         {
           function = republish
@@ -150,7 +190,7 @@ rule_engine {
           json_decode(payload.values.phase_event_json) AS evt,
           timestamp                                    AS seq
         FROM
-          "+/+/+/+/+/state-events"
+          "+/+/machining/+/+/state-events"
         WHERE
           payload.values.phase_event_json <> ''~"""
       actions = [
@@ -189,7 +229,7 @@ rule_engine {
           payload.values.power_kw       AS power_kw,
           payload.timestamp             AS ts
         FROM
-          "+/+/+/+/+/telemetry"
+          "+/+/machining/+/+/telemetry"
         WHERE
           payload.values.plc_id <> ''~"""
       actions = [
@@ -213,6 +253,86 @@ rule_engine {
           args { topic = "${enterprise}/${site}/${area}/${line}/${plc}/telemetry/power_kw"
                  qos = 0  retain = true
                  payload = """{"value":${power_kw},"ts":${ts}}""" } }
+      ]
+    }
+
+    # Same fan-out for the BACnet HVAC unit, so its measurements show up as
+    # individual leaves in the UNS view (the UNS subscribes to
+    # `+/+/+/+/+/telemetry/+`, the exploded leaves — not the bundled topic).
+    # The bundled <hvac>/telemetry topic is kept intact for the historian.
+    # Topic shape (output): <enterprise>/<site>/utilities/<line>/<hvac>/telemetry/<tag>
+    # Gate on supply_air_temp_c being present so all-error reads are skipped.
+    explode_hvac_telemetry {
+      enable = true
+      name   = "explode_hvac_telemetry"
+      sql    = """~
+        SELECT
+          nth(1, tokens(topic, '/'))           AS enterprise,
+          nth(2, tokens(topic, '/'))           AS site,
+          nth(3, tokens(topic, '/'))           AS area,
+          nth(4, tokens(topic, '/'))           AS line,
+          nth(5, tokens(topic, '/'))           AS hvac,
+          payload.values.supply_air_temp_c     AS supply_air_temp_c,
+          payload.values.return_air_temp_c     AS return_air_temp_c,
+          payload.values.outside_air_temp_c    AS outside_air_temp_c,
+          payload.values.chilled_water_temp_c  AS chilled_water_temp_c,
+          payload.values.fan_kw                AS fan_kw,
+          payload.values.filter_dp_pa          AS filter_dp_pa,
+          payload.values.temp_setpoint_c       AS temp_setpoint_c,
+          payload.values.fan_speed_pct         AS fan_speed_pct,
+          payload.values.mode_actual           AS mode_actual,
+          payload.values.unit_running          AS unit_running,
+          payload.values.fault_active          AS fault_active,
+          payload.timestamp                    AS ts
+        FROM
+          "+/+/utilities/+/+/telemetry"
+        WHERE
+          payload.values.supply_air_temp_c >= -273~"""
+      actions = [
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${hvac}/telemetry/supply_air_temp_c"
+                 qos = 0  retain = true
+                 payload = """{"value":${supply_air_temp_c},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${hvac}/telemetry/return_air_temp_c"
+                 qos = 0  retain = true
+                 payload = """{"value":${return_air_temp_c},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${hvac}/telemetry/outside_air_temp_c"
+                 qos = 0  retain = true
+                 payload = """{"value":${outside_air_temp_c},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${hvac}/telemetry/chilled_water_temp_c"
+                 qos = 0  retain = true
+                 payload = """{"value":${chilled_water_temp_c},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${hvac}/telemetry/fan_kw"
+                 qos = 0  retain = true
+                 payload = """{"value":${fan_kw},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${hvac}/telemetry/filter_dp_pa"
+                 qos = 0  retain = true
+                 payload = """{"value":${filter_dp_pa},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${hvac}/telemetry/temp_setpoint_c"
+                 qos = 0  retain = true
+                 payload = """{"value":${temp_setpoint_c},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${hvac}/telemetry/fan_speed_pct"
+                 qos = 0  retain = true
+                 payload = """{"value":${fan_speed_pct},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${hvac}/telemetry/mode_actual"
+                 qos = 0  retain = true
+                 payload = """{"value":${mode_actual},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${hvac}/telemetry/unit_running"
+                 qos = 0  retain = true
+                 payload = """{"value":${unit_running},"ts":${ts}}""" } },
+        { function = republish
+          args { topic = "${enterprise}/${site}/${area}/${line}/${hvac}/telemetry/fault_active"
+                 qos = 0  retain = true
+                 payload = """{"value":${fault_active},"ts":${ts}}""" } }
       ]
     }
 

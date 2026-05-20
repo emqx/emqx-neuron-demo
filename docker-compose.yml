@@ -145,14 +145,28 @@ services:
       <<: *plc-env
       PLC_ID: plc-2
       AXIS_ID: axis-01
-  plc-3:
-    <<: *plc
-    container_name: plc-3
-    hostname: plc-3
+
+  # Facility-side BACnet/IP device. Demonstrates Neuron's brownfield reach:
+  # neuron-3 polls this over BACnet/IP while neuron-1/2 do OPC UA on the
+  # shop floor. No MES integration — pure utilities telemetry.
+  hvac-1:
+    build:
+      context: ./services/hvac-sim
+    container_name: hvac-1
+    hostname: hvac-1
+    restart: unless-stopped
     environment:
-      <<: *plc-env
-      PLC_ID: plc-3
-      AXIS_ID: axis-01
+      HVAC_ID: hvac-1
+      BACPYPES_DEVICE_NAME: hvac-1
+      BACPYPES_DEVICE_INSTANCE: "3001"
+      BACPYPES_DEVICE_ADDRESS: "172.30.0.50/24"
+      # Set HVAC_DEBUG=1 to dump bacpypes3 APDU-level logs (diagnostics only).
+    depends_on:
+      emqx:
+        condition: service_healthy
+    networks:
+      demo:
+        ipv4_address: 172.30.0.50
 
   neuron-1:
     <<: *neuron
@@ -179,6 +193,11 @@ services:
 networks:
   demo:
     driver: bridge
+    # Static subnet so hvac-1 can be pinned to a known IP — Neuron's BACnet
+    # driver requires a numeric IP (not a hostname) for the target device.
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
 
 volumes:
   timescale-data:

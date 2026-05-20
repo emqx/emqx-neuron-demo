@@ -34,3 +34,30 @@ CREATE TABLE IF NOT EXISTS batches (
 
 CREATE INDEX IF NOT EXISTS batches_started_idx
   ON batches (COALESCE(completed_at, started_at) DESC);
+
+
+-- Facility-side telemetry from the BACnet HVAC unit. Schema follows the
+-- BACnet object map in services/hvac-sim/hvac.py.
+CREATE TABLE IF NOT EXISTS hvac_telemetry (
+  ts                   TIMESTAMPTZ NOT NULL,
+  hvac_id              TEXT,
+  supply_air_temp_c    DOUBLE PRECISION,
+  return_air_temp_c    DOUBLE PRECISION,
+  outside_air_temp_c   DOUBLE PRECISION,
+  chilled_water_temp_c DOUBLE PRECISION,
+  fan_kw               DOUBLE PRECISION,
+  filter_dp_pa         DOUBLE PRECISION,
+  temp_setpoint_c      DOUBLE PRECISION,
+  fan_speed_pct        DOUBLE PRECISION,
+  mode_actual          INTEGER,
+  -- Neuron's BACnet driver emits BV/BIT as 0/1 ints; storing as SMALLINT
+  -- avoids an EMQX rule-SQL boolean cast that the parser can't express.
+  unit_running         SMALLINT,
+  fault_active         SMALLINT,
+  raw                  JSONB
+);
+
+SELECT create_hypertable('hvac_telemetry', 'ts', if_not_exists => TRUE);
+
+CREATE INDEX IF NOT EXISTS hvac_telemetry_hvac_ts
+  ON hvac_telemetry (hvac_id, ts DESC);

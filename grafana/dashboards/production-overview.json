@@ -14,7 +14,7 @@
       "type": "stat",
       "title": "plc-1",
       "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
-      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 0},
+      "gridPos": {"h": 4, "w": 12, "x": 0, "y": 0},
       "fieldConfig": {
         "defaults": {
           "mappings": [
@@ -47,7 +47,7 @@
       "type": "stat",
       "title": "plc-2",
       "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
-      "gridPos": {"h": 4, "w": 8, "x": 8, "y": 0},
+      "gridPos": {"h": 4, "w": 12, "x": 12, "y": 0},
       "fieldConfig": {
         "defaults": {
           "mappings": [
@@ -71,39 +71,6 @@
         {
           "format": "table",
           "rawSql": "SELECT state FROM plc_telemetry WHERE plc_id = 'plc-2' ORDER BY ts DESC LIMIT 1",
-          "refId": "A", "editorMode": "code", "rawQuery": true,
-          "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
-        }
-      ]
-    },
-    {
-      "type": "stat",
-      "title": "plc-3",
-      "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"},
-      "gridPos": {"h": 4, "w": 8, "x": 16, "y": 0},
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            {"type": "value", "options": {"idle":      {"color": "text",   "index": 0}}},
-            {"type": "value", "options": {"running":   {"color": "blue",   "index": 1}}},
-            {"type": "value", "options": {"holding":   {"color": "yellow", "index": 2}}},
-            {"type": "value", "options": {"faulted":   {"color": "red",    "index": 3}}},
-            {"type": "value", "options": {"completed": {"color": "green",  "index": 4}}},
-            {"type": "value", "options": {"aborted":   {"color": "orange", "index": 5}}}
-          ],
-          "color": {"mode": "thresholds"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}
-        }
-      },
-      "options": {
-        "colorMode": "background", "graphMode": "none", "textMode": "value",
-        "justifyMode": "center",
-        "reduceOptions": {"calcs": ["last"], "fields": "/.*/", "values": false}
-      },
-      "targets": [
-        {
-          "format": "table",
-          "rawSql": "SELECT state FROM plc_telemetry WHERE plc_id = 'plc-3' ORDER BY ts DESC LIMIT 1",
           "refId": "A", "editorMode": "code", "rawQuery": true,
           "datasource": {"type": "grafana-postgresql-datasource", "uid": "timescaledb"}
         }
