@@ -9,3 +9,5 @@ venv/
 *.swp
 .idea/
 .vscode/
+
+CLAUDE.md
