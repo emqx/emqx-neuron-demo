@@ -10,16 +10,10 @@ power). Alongside them, a third neuron talks **BACnet/IP** to a simulated
 facility HVAC unit, showing the same Neuron + EMQX stack ingesting both
 shop-floor OPC UA and brownfield building-automation BACnet side-by-side.
 
-```
-operator console (ERP panel) ──► EMQX ──► MES ──► EMQX ──► neuron-1 ──► plc-1 (OPC UA)
-                                          │                neuron-2 ──► plc-2 (OPC UA)
-                                          │ batch records, order status
-                                          ▼
-                                       Postgres (via Timescale)
-                                          ▲
-                                          │ MQTT (Neuron)
-              EMQX rule engine ◄──────────┴──── neuron-3 ──► hvac-1 (BACnet/IP)
-```
+![Architecture](services/operator/static/architecture.svg)
+
+> The same diagram is served on the demo home page (<http://localhost:8080>).
+> Source of truth: `services/operator/static/architecture.svg`.
 
 ## Layout
 

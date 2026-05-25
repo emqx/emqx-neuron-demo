@@ -32,7 +32,7 @@
 
     .arch-card { background:var(--card); border:1px solid var(--line);
                  border-radius:8px; padding:24px; margin:24px 0; }
-    .arch-card svg { width:100%; height:auto; display:block; }
+    .arch-card img { width:100%; height:auto; display:block; }
 
     table { width:100%; border-collapse:collapse; font-size:13px;
             background:var(--card); border:1px solid var(--line);
@@ -64,127 +64,7 @@
     </div>
 
     <div class="arch-card">
-      <svg viewBox="0 0 920 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Architecture diagram">
-        <defs>
-          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5"
-                  markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#5a6473"/>
-          </marker>
-          <marker id="arr-o" viewBox="0 0 10 10" refX="9" refY="5"
-                  markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#d97706"/>
-          </marker>
-        </defs>
-
-        <style>
-          .box       { fill:#fff; stroke:#d8dde3; stroke-width:1.2; }
-          .box-acc   { fill:#fff; stroke:#2563eb; stroke-width:1.6; }
-          .box-hub   { fill:#eef0ff; stroke:#4338ca; stroke-width:1.8; }
-          .box-mini  { fill:#f8f9fb; stroke:#d8dde3; stroke-width:1; }
-          .box-bac   { fill:#fff7ed; stroke:#d97706; stroke-width:1.4; }
-          .box-sink  { fill:#fff; stroke:#d8dde3; stroke-width:1.2; }
-          .mini-bac  { fill:#9a5a08; font-size:11px; font-weight:600;
-                       font-family:-apple-system,sans-serif; }
-          .arr-bac   { stroke:#d97706; stroke-width:1.5; fill:none; }
-          .lbl-bac   { fill:#9a5a08; font-size:10.5px;
-                       font-family:ui-monospace,Menlo,monospace; }
-          .title     { fill:#1a2330; font-size:15px; font-weight:600;
-                       font-family:-apple-system,sans-serif; }
-          .title-hub { fill:#1a2330; font-size:17px; font-weight:700;
-                       font-family:-apple-system,sans-serif; }
-          .sub       { fill:#5a6473; font-size:11px;
-                       font-family:-apple-system,sans-serif; }
-          .mini      { fill:#1a2330; font-size:11px; font-weight:500;
-                       font-family:-apple-system,sans-serif; }
-          .layer     { fill:#8893a0; font-size:9.5px; font-weight:700;
-                       letter-spacing:0.18em;
-                       font-family:-apple-system,sans-serif; }
-          .arr-line  { stroke:#5a6473; stroke-width:1.5; fill:none; }
-          .arr-label { fill:#5a6473; font-size:10.5px;
-                       font-family:ui-monospace,Menlo,monospace; }
-        </style>
-
-        <!-- L4 -->
-        <text x="20" y="78" class="layer">L4 · ENTERPRISE</text>
-        <rect class="box-acc" x="320" y="40" width="280" height="60" rx="6"/>
-        <text x="460" y="68" class="title" text-anchor="middle">ERP</text>
-        <text x="460" y="86" class="sub" text-anchor="middle">operator console · place orders · :8080</text>
-
-        <!-- arrow op→MES -->
-        <line class="arr-line" x1="460" y1="100" x2="460" y2="148" marker-end="url(#arr)"/>
-        <text x="475" y="128" class="arr-label">orders</text>
-
-        <!-- L3 -->
-        <text x="20" y="188" class="layer">L3 · OPERATIONS</text>
-        <rect class="box-acc" x="320" y="150" width="280" height="60" rx="6"/>
-        <text x="460" y="178" class="title" text-anchor="middle">MES</text>
-        <text x="460" y="196" class="sub" text-anchor="middle">state machine · web UI · :8090</text>
-
-        <!-- bidirectional MES↔EMQX -->
-        <line class="arr-line" x1="446" y1="210" x2="446" y2="278" marker-end="url(#arr)"/>
-        <line class="arr-line" x1="474" y1="278" x2="474" y2="210" marker-end="url(#arr)"/>
-        <text x="320" y="248" class="arr-label" text-anchor="end">phase cmd</text>
-        <text x="600" y="248" class="arr-label">state events</text>
-
-        <!-- HUB -->
-        <text x="20" y="320" class="layer">UNS · HUB</text>
-        <rect class="box-hub" x="90" y="280" width="540" height="100" rx="6"/>
-        <text x="360" y="316" class="title-hub" text-anchor="middle">EMQX broker + rule engine</text>
-        <text x="360" y="338" class="sub" text-anchor="middle">MQTT :1883 · dashboard :18083</text>
-        <text x="360" y="358" class="sub" text-anchor="middle" font-style="italic">rules: phase-cmd → write-req · fault → write-req · synthesize plc/state</text>
-
-        <!-- TimescaleDB / Postgres -->
-        <rect class="box-sink" x="690" y="270" width="200" height="60" rx="6"/>
-        <text x="790" y="296" class="title" text-anchor="middle">TimescaleDB · Postgres</text>
-        <text x="790" y="316" class="sub" text-anchor="middle">plc_telemetry · hvac_telemetry · batches</text>
-        <line class="arr-line" x1="630" y1="300" x2="687" y2="300" marker-end="url(#arr)"/>
-
-        <!-- Grafana -->
-        <rect class="box-sink" x="690" y="350" width="200" height="60" rx="6"/>
-        <text x="790" y="376" class="title" text-anchor="middle">Grafana</text>
-        <text x="790" y="396" class="sub" text-anchor="middle">live curves &amp; tables · :3000</text>
-        <line class="arr-line" x1="790" y1="332" x2="790" y2="347" marker-end="url(#arr)"/>
-
-        <!-- EMQX ↔ Neurons -->
-        <line class="arr-line" x1="346" y1="380" x2="346" y2="468" marker-end="url(#arr)"/>
-        <line class="arr-line" x1="374" y1="468" x2="374" y2="380" marker-end="url(#arr)"/>
-        <text x="332" y="430" class="arr-label" text-anchor="end">&lt;plc&gt;/cmd/req</text>
-        <text x="388" y="430" class="arr-label">.../telemetry · state-events</text>
-
-        <!-- L2 -->
-        <text x="20" y="510" class="layer">L2 · EDGE</text>
-        <rect class="box" x="90" y="470" width="540" height="80" rx="6"/>
-        <text x="105" y="494" class="title">EMQX Neuron gateways</text>
-        <text x="105" y="510" class="sub">:8085–8087 · → MQTT · neuron-1/2 OPC UA (2 drivers: telemetry + events) · neuron-3 BACnet/IP</text>
-        <rect class="box-mini" x="105" y="518" width="130" height="22" rx="4"/>
-        <text x="170" y="534" class="mini" text-anchor="middle">neuron-1</text>
-        <rect class="box-mini" x="295" y="518" width="130" height="22" rx="4"/>
-        <text x="360" y="534" class="mini" text-anchor="middle">neuron-2</text>
-        <rect class="box-bac" x="485" y="518" width="130" height="22" rx="4"/>
-        <text x="550" y="534" class="mini-bac" text-anchor="middle">neuron-3</text>
-
-        <!-- Neurons ↔ machining PLCs (OPC UA) -->
-        <line class="arr-line" x1="251" y1="552" x2="251" y2="598" marker-end="url(#arr)"/>
-        <line class="arr-line" x1="279" y1="598" x2="279" y2="552" marker-end="url(#arr)"/>
-        <text x="237" y="580" class="arr-label" text-anchor="end">OPC UA :4840</text>
-
-        <!-- neuron-3 ↔ HVAC (BACnet/IP, polled read + setpoint writes) -->
-        <line class="arr-bac" x1="536" y1="552" x2="536" y2="598" marker-end="url(#arr-o)"/>
-        <line class="arr-bac" x1="564" y1="598" x2="564" y2="552" marker-end="url(#arr-o)"/>
-        <text x="578" y="580" class="lbl-bac">BACnet/IP :47808</text>
-
-        <!-- L1 -->
-        <text x="20" y="640" class="layer">L1 · DEVICES</text>
-        <rect class="box" x="90" y="600" width="540" height="80" rx="6"/>
-        <text x="105" y="624" class="title">Field devices · OPC UA machining + BACnet/IP facility</text>
-        <text x="105" y="640" class="sub">plc-1/2: OPC UA cells (python-opcua) · hvac-1: BACnet/IP rooftop AHU (bacpypes3)</text>
-        <rect class="box-mini" x="105" y="648" width="130" height="22" rx="4"/>
-        <text x="170" y="664" class="mini" text-anchor="middle">plc-1</text>
-        <rect class="box-mini" x="295" y="648" width="130" height="22" rx="4"/>
-        <text x="360" y="664" class="mini" text-anchor="middle">plc-2</text>
-        <rect class="box-bac" x="485" y="648" width="130" height="22" rx="4"/>
-        <text x="550" y="664" class="mini-bac" text-anchor="middle">hvac-1</text>
-      </svg>
+      <img src="/static/architecture.svg" alt="Architecture diagram">
     </div>
 
     <table>
