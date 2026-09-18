@@ -6,11 +6,11 @@ Neuron accepts under *South Devices → Group List → Import*. It covers the
 automated path (the `tools/ede_to_neuron.py` script) and the manual
 column-by-column mapping if you'd rather convert by hand.
 
-> Why import instead of Scan? Neuron's in-UI **Scan** for BACnet does not
-> reliably enumerate tags in the version this demo ships (neuronex 2.14.1) —
-> it floods the device and never completes, for any device. Importing an EDE
-> sheet is the dependable way to load a large controller's points, and it
-> keeps the engineering descriptions that Scan would throw away.
+> Why import instead of Scan? Earlier testing with the embedded Neuron
+> 2.14.1 daemon found that BACnet **Scan** flooded devices and never
+> completed. Scan has not been revalidated with the current NeuronEX image.
+> Explicit provisioning or EDE import remains the documented path; importing
+> an EDE sheet also preserves the controller's engineering descriptions.
 
 ## The two file formats
 

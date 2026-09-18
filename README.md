@@ -40,6 +40,9 @@ make provision    # configure all 3 neurons via REST
 
 (`make help` lists every target.)
 
+App images are pinned to EMQX 6.3.1, NeuronEX 3.9.4, Grafana 13.2.2, and
+TimescaleDB 2.30.1 on PostgreSQL 17.
+
 Open:
 - **Demo home** — <http://localhost:8080> (architecture, demo flow, links into everything else)
 - **Operator console** — <http://localhost:8080/console> (place orders, fault injection)
@@ -79,6 +82,25 @@ Defaults: `ENTERPRISE=acme-mfg`, `SITE=plant-1`, `AREA=machining`,
 `LINE=line-1`. Override via env on the `mes`, `operator`, and `plc-*`
 services (and `tools/provision_neuron.py`) to re-skin the topic taxonomy.
 The HVAC side uses `HVAC_AREA=utilities`, `HVAC_LINE=compressor-room`.
+
+## Upgrading an existing installation
+
+Back up the database and `grafana-data` volume first. [Grafana 13 migrates
+dashboard storage](https://grafana.com/docs/grafana/latest/upgrade-guide/upgrade-v13.0/),
+so rolling back requires restoring the backup. PostgreSQL stays on major
+version 17 to preserve data-volume compatibility.
+
+```bash
+docker compose pull
+docker compose build --pull
+docker compose up -d
+docker compose exec timescaledb psql -X -U demo -d demo -v ON_ERROR_STOP=1 \
+  -c 'ALTER EXTENSION timescaledb UPDATE;'
+make provision
+```
+
+The extension update is required for an existing TimescaleDB database;
+fresh volumes install the current extension automatically.
 
 ## Reset
 

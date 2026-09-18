@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["bacpypes3==0.0.106", "ifaddr"]
+# dependencies = ["bacpypes3==0.0.107", "ifaddr"]
 # ///
 """BACnet/IP HVAC simulator (rooftop AHU + chilled-water side).
 

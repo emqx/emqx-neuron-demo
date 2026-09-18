@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["paho-mqtt==2.1.0", "flask==3.0.3"]
+# dependencies = ["paho-mqtt==2.1.0", "flask==3.1.3"]
 # ///
 """MES simulator.
 

@@ -1,3 +1,9 @@
+dashboard {
+  # This file replaces the image's base.hocon, so declare the dashboard
+  # listener explicitly instead of relying on the image's defaults.
+  listeners.http.bind = "0.0.0.0:18083"
+}
+
 connectors {
   timescale {
     demo {

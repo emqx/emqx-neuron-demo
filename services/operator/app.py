@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["flask==3.0.3", "paho-mqtt==2.1.0"]
+# dependencies = ["flask==3.1.3", "paho-mqtt==2.1.0"]
 # ///
 """Operator console.
 

@@ -19,7 +19,7 @@ x-plc: &plc
     - demo
 
 x-neuron: &neuron
-  image: emqx/neuronex:latest
+  image: emqx/neuronex:3.9.4
   restart: unless-stopped
   environment:
     - LOG_CONSOLE=1
@@ -31,7 +31,7 @@ x-neuron: &neuron
 
 services:
   emqx:
-    image: emqx/emqx:6.2.0
+    image: emqx/emqx:6.3.1
     container_name: emqx
     ports:
       - "1883:1883"
@@ -52,7 +52,7 @@ services:
       - demo
 
   timescaledb:
-    image: timescale/timescaledb:latest-pg17
+    image: timescale/timescaledb:2.30.1-pg17
     container_name: timescaledb
     environment:
       POSTGRES_USER: demo
@@ -67,7 +67,7 @@ services:
       - demo
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.2.2
     container_name: grafana
     ports:
       - "3000:3000"
