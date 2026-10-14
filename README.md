@@ -15,6 +15,14 @@ shop-floor OPC UA and brownfield building-automation BACnet side-by-side.
 > The same diagram is served on the demo home page (<http://localhost:8080>).
 > Source of truth: `services/operator/static/architecture.svg`.
 
+## Booth showcase
+
+Open <http://localhost:8080/showcase> for the guided single-screen demo, live
+additional MQTT dashboard, automatic loop and non-destructive walkthrough
+reset. Product screens remain one click away. See [booth setup and hosting](docs/booth-demo.md)
+for HTTPS, shared login, rehearsal and recovery. All direct ports bind to
+loopback; the optional hosted profile exposes only its HTTPS gateway.
+
 ## Layout
 
 ```
@@ -44,6 +52,7 @@ App images are pinned to EMQX 6.3.1, NeuronEX 3.9.4, Grafana 13.2.2, and
 TimescaleDB 2.30.1 on PostgreSQL 17.
 
 Open:
+- **Live showcase** — <http://localhost:8080/showcase> (guided order, fault/recovery, additional subscriber)
 - **Demo home** — <http://localhost:8080> (architecture, demo flow, links into everything else)
 - **Operator console** — <http://localhost:8080/console> (place orders, fault injection)
 - **MES** — <http://localhost:8090> (batches in flight, HOLD / RESUME / ABORT)

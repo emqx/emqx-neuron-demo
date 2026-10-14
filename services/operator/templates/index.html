@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ERP ↔ MES ↔ PLC Demo</title>
   <style>
     :root { --bg:#f3f5f7; --card:#ffffff; --line:#d8dde3; --muted:#5a6473;
@@ -51,15 +52,16 @@
 <body>
   <main>
     <div class="hero">
-      <div class="tag">Batch manufacturing · OPC UA + BACnet/IP · unified namespace on EMQX</div>
-      <h1>EMQX as the unified-namespace hub for batch process manufacturing</h1>
+      <div class="tag">Batch manufacturing · OPC UA + BACnet/IP · unified namespace on EMQX Enterprise</div>
+      <h1>EMQX Enterprise as the unified-namespace hub for batch process manufacturing</h1>
       <div class="cta">
-        <a class="btn primary" href="/console">Open operator console</a>
+        <a class="btn primary" href="/showcase">Open live showcase</a>
+        <a class="btn" href="/console">Operator console</a>
         <a class="btn" href="/uns">Live UNS</a>
-        <a class="btn" href="http://localhost:8090/" target="_blank">MES UI</a>
-        <a class="btn" href="http://localhost:3000/d/production-overview" target="_blank">Grafana · machining</a>
-        <a class="btn" href="http://localhost:3000/d/facility-hvac" target="_blank">Grafana · HVAC</a>
-        <a class="btn" href="http://localhost:18083" target="_blank">EMQX dashboard</a>
+        <a class="btn" href="{{ links.mes }}" target="_blank" rel="noopener">MES UI</a>
+        <a class="btn" href="{{ links.grafana }}d/production-overview" target="_blank" rel="noopener">Grafana · machining</a>
+        <a class="btn" href="{{ links.grafana }}d/facility-hvac" target="_blank" rel="noopener">Grafana · HVAC</a>
+        <a class="btn" href="{{ links.emqx }}" target="_blank" rel="noopener">EMQX Enterprise dashboard</a>
       </div>
     </div>
 
@@ -70,14 +72,14 @@
     <table>
       <thead><tr><th>Service</th><th>URL</th><th>Notes</th></tr></thead>
       <tbody>
-        <tr><td>Operator console</td><td class="mono"><a href="/console">localhost:8080/console</a></td><td><span class="pill-tag">primary</span> place orders · fault injection</td></tr>
-        <tr><td>Live UNS</td><td class="mono"><a href="/uns">localhost:8080/uns</a></td><td>live topic tree · MQTT-over-WebSocket to EMQX</td></tr>
-        <tr><td>MES web UI</td><td class="mono"><a href="http://localhost:8090/" target="_blank">localhost:8090</a></td><td>batches in flight · HOLD / RESUME / ABORT</td></tr>
-        <tr><td>Grafana · machining</td><td class="mono"><a href="http://localhost:3000/d/production-overview" target="_blank">localhost:3000/d/production-overview</a></td><td>live PLC-fleet telemetry (OPC UA)</td></tr>
-        <tr><td>Grafana · HVAC</td><td class="mono"><a href="http://localhost:3000/d/facility-hvac" target="_blank">localhost:3000/d/facility-hvac</a></td><td><span class="pill-tag">BACnet</span> facility AHU temps · setpoint · fan</td></tr>
-        <tr><td>EMQX dashboard</td><td class="mono"><a href="http://localhost:18083" target="_blank">localhost:18083</a></td><td>broker · rules · sinks · admin/admin</td></tr>
-        <tr><td>Neurons 1–2</td><td class="mono">localhost:8085–8086</td><td>OPC UA → MQTT (plc-1/2) · admin/0000</td></tr>
-        <tr><td>Neuron 3</td><td class="mono">localhost:8087</td><td><span class="pill-tag">BACnet</span> BACnet/IP → MQTT (hvac-1) · admin/0000</td></tr>
+        <tr><td>Operator console</td><td class="mono"><a href="/console">Open console</a></td><td><span class="pill-tag">primary</span> place orders · fault injection</td></tr>
+        <tr><td>Live UNS</td><td class="mono"><a href="/uns">Browse namespace</a></td><td>live topic tree · MQTT-over-WebSocket to EMQX Enterprise</td></tr>
+        <tr><td>MES web UI</td><td class="mono"><a href="{{ links.mes }}" target="_blank" rel="noopener">Open MES</a></td><td>batches in flight · HOLD / RESUME / ABORT</td></tr>
+        <tr><td>Grafana · machining</td><td class="mono"><a href="{{ links.grafana }}d/production-overview" target="_blank" rel="noopener">Open production dashboard</a></td><td>live PLC-fleet telemetry (OPC UA)</td></tr>
+        <tr><td>Grafana · HVAC</td><td class="mono"><a href="{{ links.grafana }}d/facility-hvac" target="_blank" rel="noopener">Open HVAC dashboard</a></td><td><span class="pill-tag">BACnet</span> facility AHU temps · setpoint · fan</td></tr>
+        <tr><td>EMQX Enterprise dashboard</td><td class="mono"><a href="{{ links.emqx }}" target="_blank" rel="noopener">Open EMQX Enterprise dashboard</a></td><td>broker · rules · sinks</td></tr>
+        <tr><td>EMQX Neuron instances 1–2</td><td class="mono"><a href="{{ links.neuron_1 }}" target="_blank" rel="noopener">CNC 1</a> · <a href="{{ links.neuron_2 }}" target="_blank" rel="noopener">CNC 2</a></td><td>OPC UA → MQTT (plc-1/2)</td></tr>
+        <tr><td>EMQX Neuron 3</td><td class="mono"><a href="{{ links.neuron_3 }}" target="_blank" rel="noopener">Open EMQX Neuron</a></td><td><span class="pill-tag">BACnet</span> BACnet/IP → MQTT (hvac-1)</td></tr>
       </tbody>
     </table>
   </main>

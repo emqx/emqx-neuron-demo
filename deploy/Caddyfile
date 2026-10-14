@@ -1,0 +1,50 @@
+# Session-cookie authentication also protects each product's HTTP API and
+# WebSocket upgrades without replacing its own Authorization header.
+(demo_auth) {
+    forward_auth operator:8080 {
+        uri /auth/check
+        # Authenticate the HTTP handshake, not a WebSocket endpoint in Flask.
+        header_up -Upgrade
+        header_up -Connection
+    }
+}
+
+{$DEMO_DOMAIN} {
+    handle /login {
+        reverse_proxy operator:8080
+    }
+    handle {
+        import demo_auth
+        handle /mqtt {
+            reverse_proxy emqx:8083
+        }
+        handle {
+            reverse_proxy operator:8080
+        }
+    }
+}
+
+mes.{$DEMO_DOMAIN} {
+    import demo_auth
+    reverse_proxy mes:8090
+}
+grafana.{$DEMO_DOMAIN} {
+    import demo_auth
+    reverse_proxy grafana:3000
+}
+emqx.{$DEMO_DOMAIN} {
+    import demo_auth
+    reverse_proxy emqx:18083
+}
+neuron-1.{$DEMO_DOMAIN} {
+    import demo_auth
+    reverse_proxy neuron-1:8085
+}
+neuron-2.{$DEMO_DOMAIN} {
+    import demo_auth
+    reverse_proxy neuron-2:8085
+}
+neuron-3.{$DEMO_DOMAIN} {
+    import demo_auth
+    reverse_proxy neuron-3:8085
+}

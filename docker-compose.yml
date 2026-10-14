@@ -1,10 +1,10 @@
 name: erp-mes-plc-demo
 
 x-plc-env: &plc-env
-  ENTERPRISE: acme-mfg
-  SITE: plant-1
+  ENTERPRISE: ${ENTERPRISE:-acme-mfg}
+  SITE: ${SITE:-plant-1}
   AREA: machining
-  LINE: line-1
+  LINE: ${LINE:-line-1}
   MQTT_HOST: emqx
   MQTT_PORT: "1883"
 
@@ -34,9 +34,9 @@ services:
     image: emqx/emqx:6.3.1
     container_name: emqx
     ports:
-      - "1883:1883"
-      - "8083:8083"
-      - "18083:18083"
+      - "127.0.0.1:1883:1883"
+      - "127.0.0.1:8083:8083"
+      - "127.0.0.1:18083:18083"
     environment:
       EMQX_DASHBOARD__DEFAULT_USERNAME: admin
       EMQX_DASHBOARD__DEFAULT_PASSWORD: admin
@@ -59,7 +59,7 @@ services:
       POSTGRES_PASSWORD: demo
       POSTGRES_DB: demo
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - timescale-data:/var/lib/postgresql/data
       - ./timescale/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -70,7 +70,7 @@ services:
     image: grafana/grafana:13.2.2
     container_name: grafana
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
@@ -91,15 +91,15 @@ services:
     container_name: mes
     hostname: mes
     environment:
-      ENTERPRISE: acme-mfg
-      SITE: plant-1
+      ENTERPRISE: ${ENTERPRISE:-acme-mfg}
+      SITE: ${SITE:-plant-1}
       AREA: machining
-      LINE: line-1
+      LINE: ${LINE:-line-1}
       MQTT_HOST: emqx
       MQTT_PORT: "1883"
       PORT: "8090"
     ports:
-      - "8090:8090"
+      - "127.0.0.1:8090:8090"
     restart: unless-stopped
     depends_on:
       emqx:
@@ -113,15 +113,17 @@ services:
     container_name: operator
     hostname: operator
     environment:
-      ENTERPRISE: acme-mfg
-      SITE: plant-1
+      ENTERPRISE: ${ENTERPRISE:-acme-mfg}
+      SITE: ${SITE:-plant-1}
       AREA: machining
-      LINE: line-1
+      LINE: ${LINE:-line-1}
       MQTT_HOST: emqx
       MQTT_PORT: "1883"
       PORT: "8080"
+      SHOWCASE_TITLE: ${SHOWCASE_TITLE:-The Factory Data Connection Foundation}
+      SHOWCASE_EVENT: ${SHOWCASE_EVENT:-Live manufacturing demonstration}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
     depends_on:
       emqx:
@@ -172,21 +174,21 @@ services:
     <<: *neuron
     container_name: neuron-1
     hostname: neuron-1
-    ports: ["8085:8085"]
+    ports: ["127.0.0.1:8085:8085"]
     volumes:
       - neuron-1-data:/opt/neuronex/data
   neuron-2:
     <<: *neuron
     container_name: neuron-2
     hostname: neuron-2
-    ports: ["8086:8085"]
+    ports: ["127.0.0.1:8086:8085"]
     volumes:
       - neuron-2-data:/opt/neuronex/data
   neuron-3:
     <<: *neuron
     container_name: neuron-3
     hostname: neuron-3
-    ports: ["8087:8085"]
+    ports: ["127.0.0.1:8087:8085"]
     volumes:
       - neuron-3-data:/opt/neuronex/data
 
