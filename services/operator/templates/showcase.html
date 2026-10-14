@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Follow live factory data from individual machines through EMQX Neuron and EMQX Enterprise to business applications.">
+  <title>{{ demo_config.title }} · EMQX</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='showcase.css') }}">
+  <script id="demo-config" type="application/json">{{ demo_config | tojson }}</script>
+  <script defer src="{{ url_for('static', filename='vendor/mqtt.min.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='connection.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='showcase.js') }}"></script>
+</head>
+<body>
+  <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="orders-icon" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2h6v2M9 9h6m-6 4h6m-6 4h3"/></symbol>
+    <symbol id="mes-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><path d="M14 6h4v5M6 14v4h5M15 3l3 3-3 3M3 15l3 3 3-3"/></symbol>
+    <symbol id="chart-icon" viewBox="0 0 24 24"><path d="M4 3v17h17M8 15v-5m5 5V6m5 9V3"/></symbol>
+    <symbol id="expand-icon" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></symbol>
+    <symbol id="cnc-device" viewBox="0 0 240 120">
+      <ellipse cx="123" cy="108" rx="93" ry="8" fill="#f5f5f5"/>
+      <path d="m44 28 23-15h120l-23 15Z" fill="#fafafa" stroke="#a3a3a3"/>
+      <path d="m164 28 23-15v82l-23 14Z" fill="#d4d4d4" stroke="#a3a3a3"/>
+      <rect x="44" y="28" width="120" height="81" rx="2" fill="#fafafa" stroke="#a3a3a3"/>
+      <path d="M44 32h120v9H44" fill="#189bfe"/>
+      <rect x="54" y="49" width="63" height="49" rx="2" fill="#e5e5e5" stroke="#a3a3a3"/>
+      <rect x="60" y="54" width="51" height="37" rx="1" fill="#343741"/>
+      <path d="M86 55v12m-5-2h10l-5 10ZM67 85h36l-6-6H73Z" fill="#d4d4d4" stroke="#d4d4d4" stroke-width="2"/>
+      <path d="m63 57 19 31m9-31 17 27" stroke="#fff" stroke-opacity=".08" stroke-width="6"/>
+      <path d="M121 58v27" stroke="#a3a3a3" stroke-width="3" stroke-linecap="round"/>
+      <rect x="132" y="48" width="24" height="21" rx="2" fill="#343741"/>
+      <path d="M137 54h10m-10 4h14m-14 4h7" stroke="#74c3fe" stroke-width="1.5"/>
+      <g fill="#a3a3a3"><circle cx="136" cy="76" r="2"/><circle cx="144" cy="76" r="2"/><circle cx="152" cy="76" r="2"/><circle cx="136" cy="84" r="2"/><circle cx="144" cy="84" r="2"/></g>
+      <circle cx="152" cy="87" r="3" fill="#e39e67"/>
+      <path d="M53 110v3h14v-3m76 0v3h13v-3" stroke="#737373" stroke-width="3"/>
+      <path d="M143 26V14" stroke="#a3a3a3" stroke-width="3"/><rect x="139" y="8" width="8" height="8" rx="2" fill="#168865"/>
+      <path d="m175 42 6-4m-6 10 6-4m-6 10 6-4m-6 10 6-4m-6 10 6-4" stroke="#a3a3a3" stroke-width="2"/>
+    </symbol>
+    <symbol id="hvac-device" viewBox="0 0 240 120">
+      <ellipse cx="123" cy="108" rx="93" ry="8" fill="#f5f5f5"/>
+      <path d="m38 48 29-22h133l-29 22Z" fill="#f5f5f5" stroke="#a3a3a3"/>
+      <path d="m171 48 29-22v61l-29 21Z" fill="#d4d4d4" stroke="#a3a3a3"/>
+      <rect x="38" y="48" width="133" height="60" rx="2" fill="#fafafa" stroke="#a3a3a3"/>
+      <path d="M38 51h133v7H38" fill="#189bfe"/>
+      <ellipse cx="96" cy="37" rx="21" ry="6" fill="#d4d4d4" stroke="#a3a3a3"/>
+      <ellipse cx="153" cy="37" rx="21" ry="6" fill="#d4d4d4" stroke="#a3a3a3"/>
+      <path d="M80 37h32m-16-4v8m41-4h32m-16-4v8" stroke="#a3a3a3"/>
+      <circle cx="76" cy="82" r="19" fill="#e5e5e5" stroke="#a3a3a3"/>
+      <g fill="#a3a3a3"><path d="M76 79c-13-10-16 2-5 5l5-2Zm3 3c10-13-2-16-5-5l2 5Zm-3 3c13 10 16-2 5-5l-5 2Zm-3-3c-10 13 2 16 5 5l-2-5Z"/></g>
+      <circle cx="76" cy="82" r="4" fill="#737373"/>
+      <path d="M110 66h46m-46 6h46m-46 6h46m-46 6h46m-46 6h46m-46 6h46" stroke="#a3a3a3" stroke-width="2"/>
+      <path d="m180 58 12-9m-12 16 12-9m-12 16 12-9m-12 16 12-9m-12 16 12-9" stroke="#a3a3a3" stroke-width="2"/>
+      <path d="M48 110v3h17v-3m83 0v3h14v-3" stroke="#737373" stroke-width="3"/>
+    </symbol>
+  </defs></svg>
+
+  <header class="masthead">
+    <a class="brand" href="/" aria-label="EMQ demo home"><img class="brand-logo" src="{{ url_for('static', filename='brands/emq.svg') }}" alt="EMQ" width="80" height="24"><span class="brand-divider"></span><span class="brand-product">Industrial connectivity</span></a>
+    <nav class="main-nav" aria-label="Main navigation"><a href="/" aria-current="page">Overview</a><a href="/uns">Live namespace <span>↗</span></a><a href="/tools">Demo tools <span>↗</span></a></nav>
+    <div class="top-actions">
+      <span class="connection" id="connection" role="status"><i></i>Connecting</span>
+      <details class="tools"><summary>Product screens <span>⌄</span></summary><nav aria-label="Product screens">
+        <a href="{{ links.neuron_1 }}" target="_blank" rel="noopener">EMQX Neuron · CNC 1 ↗</a>
+        <a href="{{ links.neuron_2 }}" target="_blank" rel="noopener">EMQX Neuron · CNC 2 ↗</a>
+        <a href="{{ links.neuron_3 }}" target="_blank" rel="noopener">EMQX Neuron · BACnet ↗</a>
+        <a href="{{ links.emqx }}" target="_blank" rel="noopener">EMQX Enterprise ↗</a>
+        <a href="{{ links.mes }}" target="_blank" rel="noopener">MES execution ↗</a>
+        <a href="{{ links.grafana }}d/production-overview" target="_blank" rel="noopener">Production history ↗</a>
+        <a href="{{ links.grafana }}d/facility-hvac" target="_blank" rel="noopener">Building history ↗</a>
+        <a href="/console">Operator console ↗</a>
+      </nav></details>
+      <button class="icon-button" id="fullscreen" title="Toggle full screen" aria-label="Toggle full screen"><svg><use href="#expand-icon"/></svg></button>
+    </div>
+  </header>
+  <main>
+    <section class="intro">
+      <div><div class="eyebrow"><span></span>{{ demo_config.event }}</div><h1>{{ demo_config.title }}</h1><p>Every device connected. Every data path visible. One shared foundation.</p></div>
+      <div class="intro-meta"><span>{{ demo_config.enterprise }} <b>/</b> {{ demo_config.site }}</span><small>Simulated equipment · live data flow</small></div>
+    </section>
+    <p class="notice" id="notice" role="alert" hidden></p>
+
+    <div class="showcase-layout">
+      <section class="architecture" aria-label="Live factory data path, from shop floor at the bottom to enterprise applications at the top">
+        <div class="map-heading"><h2>Connected factory</h2><div class="map-actions"><div class="flow-legend"><span><i class="legend-data">↑</i> Data &amp; events</span><span><i class="legend-command">↓</i> Orders &amp; commands</span></div><button class="motion-toggle" id="flow-motion" type="button" aria-pressed="false">Animate packets</button></div></div>
+        <div class="system-map">
+          <div class="layer-label"><span>04 / APPLICATIONS</span><h3>Enterprise<br> &amp; cloud</h3><p>Demo apps run locally</p></div>
+          <div class="application-nodes three-up">
+            <a class="app-node" href="/console"><svg class="node-icon"><use href="#orders-icon"/></svg><div><h3>ERP / Orders</h3><p>Plan production</p></div><span class="open-arrow">↗</span></a>
+            <a class="app-node" href="{{ links.mes }}" target="_blank" rel="noopener"><svg class="node-icon"><use href="#mes-icon"/></svg><div><h3>MES</h3><p>Orchestrate execution</p></div><span class="open-arrow">↗</span></a>
+            <a class="app-node" href="{{ links.grafana }}d/production-overview" target="_blank" rel="noopener"><svg class="node-icon"><use href="#chart-icon"/></svg><div><h3>Analytics</h3><p>TimescaleDB → Grafana</p></div><span class="open-arrow">↗</span></a>
+          </div>
+
+          <div class="layer-spacer" aria-hidden="true"></div>
+          <div class="flow distribution three-up" id="flow-distribution" aria-label="EMQX sends status to ERP, events to MES, and telemetry to storage; orders and commands return to EMQX">
+            <div class="flow-lane"><span class="flow-line data-line" data-traffic="order-status"></span><span class="flow-line command-line" data-traffic="orders"></span><span class="wire-label">Orders / status</span></div>
+            <div class="flow-lane"><span class="flow-line data-line" data-traffic="machine-events"></span><span class="flow-line command-line" data-traffic="commands"></span><span class="wire-label">Commands / events</span></div>
+            <div class="flow-lane"><span class="flow-line data-line" data-traffic="acquisition"></span><span class="wire-label">Telemetry / history</span></div>
+          </div>
+
+          <div class="layer-label"><span>03 / SHARED DATA</span><h3>Unified<br> namespace</h3><p>Publish once, use anywhere</p></div>
+          <article class="broker">
+            <div class="broker-main"><img class="broker-logo" src="{{ url_for('static', filename='brands/emqx.svg') }}" width="40" height="40" alt=""><div><div class="product-kicker">THE MQTT DATA BACKBONE</div><a href="{{ links.emqx }}" target="_blank" rel="noopener"><h3>EMQX Enterprise <span>↗</span></h3></a></div><span class="tag">JSON / MQTT</span></div>
+            <div class="broker-foot"><a href="/uns" class="namespace-label">{{ demo_config.enterprise }}<span>/</span>{{ demo_config.site }}<span>/</span># <b>↗</b></a><span id="messages">0 messages observed</span></div>
+          </article>
+
+          <div class="layer-spacer" aria-hidden="true"></div>
+          <div class="flow acquisition three-up" id="flow-acquisition" aria-label="Each Neuron publishes MQTT data upward; machine commands return downward through Neuron 1 and 2">
+            {% for id in ['plc-1', 'plc-2', 'hvac-1'] %}
+            <div class="flow-lane source-lane"><span class="flow-line data-line" data-traffic="acquisition:{{ id }} events:{{ id }}"></span>{% if id != 'hvac-1' %}<span class="flow-line command-line" data-traffic="commands:{{ id }}"></span>{% endif %}<span class="wire-label">MQTT</span></div>
+            {% endfor %}
+          </div>
+
+          <div class="layer-label"><span>02 / EDGE</span><h3>Industrial<br> connectivity</h3><p><i id="neuron-light"></i><span id="sources-count">Waiting for sources</span></p></div>
+          <div class="gateway-nodes three-up">
+            {% for id, number, protocol in [('plc-1',1,'OPC UA'),('plc-2',2,'OPC UA'),('hvac-1',3,'BACnet/IP')] %}
+            <a class="gateway" id="gateway-{{ id }}" href="{{ links['neuron_' ~ number] }}" target="_blank" rel="noopener"><img class="gateway-icon" src="{{ url_for('static', filename='brands/neuron.svg') }}" width="32" height="32" alt=""><div><div class="gateway-id">GATEWAY {{ '%02d' | format(number) }} <i data-gateway-light></i></div><h3>EMQX Neuron</h3><p>{{ protocol }} → MQTT</p></div><span class="open-arrow">↗</span></a>
+            {% endfor %}
+          </div>
+
+          <div class="layer-spacer" aria-hidden="true"></div>
+          <div class="flow device-connections three-up" aria-label="CNC 01 and CNC 02 connect using OPC UA; building HVAC connects using BACnet/IP">
+            {% for id, protocol in [('plc-1','OPC UA'),('plc-2','OPC UA'),('hvac-1','BACnet/IP')] %}
+            <div class="flow-lane source-lane"><span class="flow-line data-line" data-traffic="acquisition:{{ id }} events:{{ id }}"></span>{% if id != 'hvac-1' %}<span class="flow-line command-line" data-traffic="commands:{{ id }}"></span>{% endif %}<span class="wire-label">{{ protocol }}</span></div>
+            {% endfor %}
+          </div>
+
+          <div class="layer-label floor-label"><span>01 / SHOP FLOOR</span><h3>Individual<br> devices</h3><p>Two machines.<br>One building system.</p></div>
+          <div class="equipment three-up">
+            {% for id, name, icon, subtitle in [('plc-1','CNC 01','cnc-device','Machining cell · plc-1'),('plc-2','CNC 02','cnc-device','Machining cell · plc-2'),('hvac-1','Building HVAC','hvac-device','Air handling unit · hvac-1')] %}
+            <article class="asset" id="asset-{{ id }}">
+              <div class="asset-heading"><h3>{{ name }}</h3><span class="asset-status-dot" aria-hidden="true"></span></div>
+              <p class="asset-subtitle">{{ subtitle }}</p>
+              <svg class="device-illustration" aria-hidden="true"><use href="#{{ icon }}"/></svg>
+              <div class="asset-reading"><strong data-metric>—</strong><span data-unit>{{ '°C supply air' if id == 'hvac-1' else 'rpm' }}</span><span class="secondary-reading" data-secondary>— kW</span></div>
+              <div class="asset-bottom"><span data-state>Waiting for data</span><span data-age>—</span></div>
+            </article>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="map-footer"><span><i></i>Packets show recently observed MQTT traffic</span><span class="return-path" id="flow-commands">↓ MES commands return to the CNCs</span></div>
+      </section>
+
+      <aside class="demo-rail" aria-label="Interactive demonstration">
+        <section class="story" aria-label="Guided walkthrough">
+          <div class="rail-kicker"><span class="play-mark">▶</span> SEE IT IN MOTION <span>~ 1 MIN</span></div>
+          <div class="story-step" id="story-step">READY TO EXPLORE</div><h2 id="story-title">Connect once. Use the data everywhere.</h2><p id="caption">Follow a production order, then connect another dashboard to the same factory data.</p>
+          <div class="story-controls"><button class="primary" id="start" disabled>▶ Start walkthrough</button><div class="secondary-controls"><button id="loop" disabled>↻ Auto loop</button><button id="reset">Reset walkthrough</button></div></div>
+        </section>
+        <section class="mes-card"><div class="app-heading"><h3>Production order</h3><span class="state-pill" id="order-state">Ready</span></div><div class="order-phase" id="order-phase">Ready for the next part</div><div class="phase-track" id="phase-track"><span data-phase="load">Load</span><span data-phase="rough">Rough</span><span data-phase="finish">Finish</span><span data-phase="unload">Unload</span></div><div class="order-meta" id="order-meta">ERP → MES → machine → completion</div><div class="fault-controls"><button id="inject" disabled>Inject fault</button><button id="clear" disabled>Clear fault</button></div></section>
+        <section class="extra-app" id="extra-app">
+          <div id="dashboard-empty"><div class="app-heading"><svg class="node-icon"><use href="#chart-icon"/></svg><span class="subscriber-tag">NEW SUBSCRIBER</span></div><h3>Same data. Another possibility.</h3><p>Connect a live power dashboard to the existing machine data.</p><button id="attach">+ Add a dashboard</button></div>
+          <div id="dashboard-live" hidden><div class="app-heading"><h3>Machine power</h3><button class="text-button" id="detach">Disconnect</button></div><div class="power"><strong id="power-value">—</strong><span>kW · two CNCs</span></div><svg class="sparkline" viewBox="0 0 320 56" preserveAspectRatio="none" role="img" aria-label="Power readings received by the additional dashboard"><path id="spark-fill"/><path id="spark-line"/></svg><div class="subscriber-status" id="subscriber-status" role="status">Connecting a new subscriber…</div></div>
+        </section>
+      </aside>
+    </div>
+
+    <section class="evidence" aria-label="Live data and events">
+      <article class="data-contract"><div class="evidence-heading"><h3><span>↗</span> Follow one measurement</h3><span id="sample-freshness">Waiting</span></div><div class="sample-path"><span>CNC 01</span><b>→</b><span>Neuron 01</span><b>→</b><span>EMQX</span><b>→</b><span>Any subscriber</span></div><code class="topic" id="sample-topic">{{ demo_config.machinePrefix }}/plc-1/telemetry/spindle_rpm</code><pre id="sample-payload">Waiting for a measurement…</pre></article>
+      <article class="timeline"><div class="evidence-heading"><h3><span>◷</span> What just happened</h3><span>Observed MQTT events</span></div><ol id="events"><li class="empty">Start a walkthrough to follow the order.</li></ol></article>
+    </section>
+    <footer><span>EMQX Neuron + EMQX Enterprise <b>·</b> A connected manufacturing demo</span><a href="/tools">Explore all demo tools ↗</a></footer>
+  </main>
+</body>
+</html>

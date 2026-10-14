@@ -34,7 +34,7 @@ import httpx
 
 ENTERPRISE = os.getenv("ENTERPRISE", "acme-mfg")
 SITE       = os.getenv("SITE", "plant-1")
-AREA       = os.getenv("AREA", "machining")
+AREA       = "machining"  # Must match the bundled EMQX rule topic filters.
 LINE       = os.getenv("LINE", "line-1")
 HVAC_AREA  = os.getenv("HVAC_AREA", "utilities")
 HVAC_LINE  = os.getenv("HVAC_LINE", "compressor-room")
@@ -305,10 +305,10 @@ def provision_bacnet(base: str, name: str, host_ip: str, device_id: int) -> None
 
 def main() -> int:
     targets: list[tuple[str, str, dict]] = [
-        ("opcua",  f"localhost:8085", {"plc_id": "plc-1"}),
-        ("opcua",  f"localhost:8086", {"plc_id": "plc-2"}),
-        ("bacnet", f"localhost:8087",
-         {"name": "hvac-1", "host_ip": "172.30.0.50", "device_id": 3001}),
+        ("opcua",  os.getenv("NEURON_API_1", "localhost:8085"), {"plc_id": "plc-1"}),
+        ("opcua",  os.getenv("NEURON_API_2", "localhost:8086"), {"plc_id": "plc-2"}),
+        ("bacnet", os.getenv("NEURON_API_3", "localhost:8087"),
+         {"name": "hvac-1", "host_ip": os.getenv("BACNET_HOST", "172.30.0.50"), "device_id": 3001}),
     ]
     for kind, base, params in targets:
         label = params.get("plc_id") or params.get("name")

@@ -71,7 +71,7 @@
   <main>
     <div class="card">
       <div class="meta">
-        Subscribed to <code>acme-mfg/+/orders/#</code>, <code>acme-mfg/+/batches/#</code>, <code>acme-mfg/+/+/+/+/state</code>, <code>acme-mfg/+/+/+/+/state-events</code>, <code>acme-mfg/+/+/+/+/telemetry/+</code>, <code>acme-mfg/+/+/+/+/cmd/+</code>, <code>acme-mfg/+/+/+/+/_demo/fault</code> · MQTT over WebSocket → <code id="ws-url">ws://…:8083/mqtt</code> · click any topic row to expand the full payload
+        Subscribed to <code>{{ demo_config.prefix }}/orders/#</code>, <code>{{ demo_config.prefix }}/batches/#</code>, <code>{{ demo_config.prefix }}/+/+/+/state</code>, <code>{{ demo_config.prefix }}/+/+/+/state-events</code>, <code>{{ demo_config.prefix }}/+/+/+/telemetry/+</code>, <code>{{ demo_config.prefix }}/+/+/+/cmd/+</code>, <code>{{ demo_config.prefix }}/+/+/+/_demo/fault</code> · MQTT over WebSocket → <code id="ws-url">connecting…</code> · click any topic row to expand the full payload
       </div>
       <div id="tree" class="tree">
         <div class="empty">No messages yet.</div>
@@ -79,10 +79,11 @@
     </div>
   </main>
 
-  <script src="https://unpkg.com/mqtt@5.15.2/dist/mqtt.min.js"></script>
+  <script src="{{ url_for('static', filename='vendor/mqtt.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='connection.js') }}"></script>
   <script>
-    const wsHost = location.hostname || 'localhost';
-    const wsUrl = `ws://${wsHost}:8083/mqtt`;
+    const config = {{ demo_config | tojson }};
+    const wsUrl = demoConnection(config);
     document.getElementById('ws-url').textContent = wsUrl;
 
     // Tree: root.children: Map<segment, node>
@@ -231,13 +232,13 @@
     client.on('connect',   () => {
       setStatus('connected', 'on');
       client.subscribe([
-        'acme-mfg/+/orders/#',
-        'acme-mfg/+/batches/#',
-        'acme-mfg/+/+/+/+/state',
-        'acme-mfg/+/+/+/+/state-events',
-        'acme-mfg/+/+/+/+/telemetry/+',
-        'acme-mfg/+/+/+/+/cmd/+',
-        'acme-mfg/+/+/+/+/_demo/fault',
+        config.prefix + '/orders/#',
+        config.prefix + '/batches/#',
+        config.prefix + '/+/+/+/state',
+        config.prefix + '/+/+/+/state-events',
+        config.prefix + '/+/+/+/telemetry/+',
+        config.prefix + '/+/+/+/cmd/+',
+        config.prefix + '/+/+/+/_demo/fault',
       ], {qos: 0});
     });
     client.on('reconnect', () => setStatus('reconnecting…', 'warn'));

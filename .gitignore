@@ -11,3 +11,8 @@ venv/
 .vscode/
 
 CLAUDE.md
+
+# Hosted-demo secrets
+.env.booth
+# Optional local fallback recording
+services/operator/static/recording.mp4

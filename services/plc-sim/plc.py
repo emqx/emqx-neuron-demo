@@ -307,8 +307,9 @@ def main() -> None:
                                              current_phase or phase, "")
                             reset_phase_state()
                             unit_state = PlcState.IDLE
-                            # leave terminal "aborted" briefly visible for one
-                            # tick so MES sees the transition, then idle.
+                            # Latch the terminal event until the next start.
+                            # Clearing it in this tick can coalesce aborted →
+                            # idle before Neuron's monitored item sees it.
                     elif item[0] == "fault":
                         _, action, ftype = item
                         if action == "inject" and unit_state == PlcState.RUNNING:
@@ -340,8 +341,8 @@ def main() -> None:
                           flush=True)
                     reset_phase_state()
                     unit_state = PlcState.IDLE
-                    # idle state will be written next tick (after the
-                    # "completed" event is visible to MES).
+                    # Keep the completed lifecycle event until the next
+                    # command. The operational telemetry is already idle.
                     state_str = "idle"
             elif unit_state == PlcState.HOLDING:
                 values = last_values
@@ -355,9 +356,9 @@ def main() -> None:
                 values = sample("idle", 0, 1, coolant_carry)
                 last_values = values
                 state_str = "idle"
-                # Move out of any terminal-state-display back to idle.
-                if last_published_phase_state in ("completed", "aborted"):
-                    write_state_tags("idle", "", "", "")
+                # Do not immediately overwrite a terminal lifecycle event.
+                # MES must observe completed/aborted before it can dispatch
+                # the next phase or acknowledge cancellation.
 
             for tag, value in values.items():
                 nodes[tag].set_value(value)
