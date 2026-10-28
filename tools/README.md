@@ -109,7 +109,7 @@ Matches what Neuron's `Export` produces for a configured BACnet node:
 
 ### Importing into Neuron
 
-In the NeuronEX UI:
+In the EMQX Neuron UI:
 
 1. **South Devices → src-bacnet → Group List**
 2. Hover **Import** (top right of the group list), download the template

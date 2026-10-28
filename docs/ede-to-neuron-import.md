@@ -8,7 +8,7 @@ column-by-column mapping if you'd rather convert by hand.
 
 > Why import instead of Scan? Earlier testing with the embedded Neuron
 > 2.14.1 daemon found that BACnet **Scan** flooded devices and never
-> completed. Scan has not been revalidated with the current NeuronEX image.
+> completed. Scan has not been revalidated with the current EMQX Neuron image.
 > Explicit provisioning or EDE import remains the documented path; importing
 > an EDE sheet also preserves the controller's engineering descriptions.
 

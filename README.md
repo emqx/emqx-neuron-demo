@@ -66,7 +66,7 @@ and the HVAC unit must have fresh telemetry. Each browser gets its own
 signed visitor session; each device has its own claim queue.
 `make help` lists the available targets.
 
-App images are pinned to EMQX 6.3.2, NeuronEX 4.0.0, Grafana 13.2.2, and
+App images are pinned to EMQX 6.3.2, EMQX Neuron 4.0.0, Grafana 13.2.2, and
 TimescaleDB 2.30.1 on PostgreSQL 17.
 
 Open:
