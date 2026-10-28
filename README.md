@@ -12,43 +12,6 @@ shop-floor OPC UA and brownfield building-automation BACnet side-by-side.
 
 ![Interactive demo with device controls, Neuron gateways, EMQX and live MQTT traffic](docs/images/demo.jpg)
 
-## Live demo
-
-Open <http://localhost:8080> for the live shop-floor-to-cloud overview:
-individual CNC and HVAC devices, their Neuron gateways, the EMQX namespace,
-and enterprise applications. Data flows upward; MES commands return to the
-addressed CNC. The enterprise/cloud tier represents the application layer;
-all services in the local demo run in Docker. Equipment is simulated;
-protocol acquisition, MQTT distribution, MES commands and state changes use
-the running stack. Device controls, per-device claim queues, an ERP batch
-button and two live MQTT traffic panes are on the same page, also at
-`/showcase`. **Tools** opens the individual applications.
-All published service ports bind to `127.0.0.1` for local access.
-
-## Layout
-
-<details>
-<summary>Architecture diagram</summary>
-
-![Architecture](services/operator/static/architecture.svg)
-
-The same diagram is available on the [demo tools page](http://localhost:8080/tools).
-
-</details>
-
-```
-docker-compose.yml             EMQX + 2 PLCs + 1 HVAC + 3 neurons + MES + operator + storage
-services/operator/             Flask: ERP "place order" panel + PLC/order status
-services/mes-sim/              Python: state-machine MES, web UI for batches in flight
-services/plc-sim/              Python: OPC UA machining-cell PLC, command-driven
-services/hvac-sim/             Python: BACnet/IP rooftop AHU simulator (bacpypes3)
-emqx/base.hocon                rule engine + Timescale sinks (plc + hvac)
-timescale/init.sql             plc_telemetry + hvac_telemetry hypertables + batches table
-grafana/                       provisioned datasource + production-overview + facility-hvac dashboards
-tools/provision_neuron.py      REST-API neuron provisioning (OPC UA on neuron-1/2, BACnet on neuron-3)
-tools/place_order.py           dev helper: publish a JSON order from the CLI
-```
-
 ## Quick start
 
 Install Docker with Docker Compose and [uv](https://docs.astral.sh/uv/)
@@ -61,15 +24,28 @@ make up           # generate private local credentials, then build/start
 make provision    # configure Neuron, viewers, database grants and retention
 ```
 
-Open <http://localhost:8080> and wait for **All sources live**: both CNCs
-and the HVAC unit must have fresh telemetry. Each browser gets its own
+After provisioning, open <http://localhost:8080> and wait for **Device data live**:
+both CNCs and the HVAC unit must have fresh telemetry. Each browser gets its own
 signed visitor session; each device has its own claim queue.
 `make help` lists the available targets.
 
 App images are pinned to EMQX 6.3.2, EMQX Neuron 4.0.0, Grafana 13.2.2, and
 TimescaleDB 2.30.1 on PostgreSQL 17.
 
-Open:
+## Live demo
+
+The home page shows individual CNC and HVAC devices, their Neuron gateways,
+the EMQX namespace, and enterprise applications. Data flows upward; MES
+commands return to the addressed CNC. The enterprise/cloud tier represents
+the application layer; all services in the local demo run in Docker.
+Equipment is simulated; protocol acquisition, MQTT distribution, MES
+commands and state changes use the running stack. Device controls,
+per-device claim queues, an ERP batch button and two live MQTT traffic
+panes are on the same page, also at `/showcase`. **Tools** opens the
+individual applications. All published service ports bind to `127.0.0.1`
+for local access.
+
+Once the stack is running:
 
 - **Live showcase** — <http://localhost:8080/showcase> (device controls, ERP orders and MQTT traffic)
 - **Demo home** — <http://localhost:8080> (live device-to-cloud map and interactive controls)
@@ -130,6 +106,30 @@ username. Only the operator holds the private signing key. Broker ACLs allow
 subscriptions to demo telemetry, commands and events; publishing and gateway
 file-management topics are denied. Internal services use separate credentials
 and topic ACLs. The namespace tree and traffic panes are real MQTT subscribers.
+
+## Layout
+
+<details>
+<summary>Architecture diagram</summary>
+
+![Architecture](services/operator/static/architecture.svg)
+
+The same diagram is available on the [demo tools page](http://localhost:8080/tools).
+
+</details>
+
+```
+docker-compose.yml             EMQX + 2 PLCs + 1 HVAC + 3 neurons + MES + operator + storage
+services/operator/             Flask: ERP "place order" panel + PLC/order status
+services/mes-sim/              Python: state-machine MES, web UI for batches in flight
+services/plc-sim/              Python: OPC UA machining-cell PLC, command-driven
+services/hvac-sim/             Python: BACnet/IP rooftop AHU simulator (bacpypes3)
+emqx/base.hocon                rule engine + Timescale sinks (plc + hvac)
+timescale/init.sql             plc_telemetry + hvac_telemetry hypertables + batches table
+grafana/                       provisioned datasource + production-overview + facility-hvac dashboards
+tools/provision_neuron.py      REST-API neuron provisioning (OPC UA on neuron-1/2, BACnet on neuron-3)
+tools/place_order.py           dev helper: publish a JSON order from the CLI
+```
 
 ## Operating the demo
 
