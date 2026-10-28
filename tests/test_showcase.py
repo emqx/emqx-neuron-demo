@@ -194,10 +194,11 @@ class AuthTests(unittest.TestCase):
     def test_unauthenticated_controls_are_blocked(self):
         response = self.client.post("/api/demo/start", base_url=self.base, json={})
         self.assertEqual(response.status_code, 401)
-        self.assertEqual(self.client.get("/showcase", base_url=self.base).status_code, 302)
+        self.assertEqual(self.client.get("/", base_url=self.base).status_code, 302)
 
     def test_auth_gateway_accepts_session_without_consuming_product_token(self):
         response = self.login()
+        self.assertEqual(response.headers["Location"], self.base + "/")
         self.assertIn("HttpOnly", response.headers["Set-Cookie"])
         self.assertIn("Secure", response.headers["Set-Cookie"])
         response = self.client.get("/auth/check", base_url=self.base,
@@ -207,7 +208,7 @@ class AuthTests(unittest.TestCase):
     def test_redirect_cannot_escape_the_demo(self):
         for value in ("https://evil.example/", "//evil.example/", "/\\evil.example/"):
             response = self.login(next=value)
-            self.assertEqual(response.headers["Location"], self.base + "/showcase")
+            self.assertEqual(response.headers["Location"], self.base + "/")
 
     def test_bad_password_and_rate_limit(self):
         for _ in range(5):
@@ -226,22 +227,21 @@ class AuthTests(unittest.TestCase):
             self.assertEqual(self.client.post("/api/demo/start", base_url=self.base, json=body).status_code, 400)
         self.assertEqual(self.client.post("/api/place-order", base_url=self.base,
                                           json={"qty": "not a number", "recipe_id": "program-a"}).status_code, 400)
-        page = self.client.get("/showcase", base_url=self.base).get_data(as_text=True)
+        page = self.client.get("/", base_url=self.base).get_data(as_text=True)
         self.assertIn("/static/vendor/mqtt.min.js", page)
         self.assertNotIn("unpkg.com", page)
         self.assertNotIn("http://localhost", page)
 
-    def test_live_home_and_legacy_tools_remain_accessible(self):
+    def test_interactive_home_and_namespace_are_the_only_demo_pages(self):
         self.login()
-        with patch.dict("os.environ", {"SHOWCASE_HOME": "1"}):
-            page = self.client.get("/", base_url=self.base)
-            self.assertEqual(page.status_code, 200)
-            self.assertIn('id="asset-hvac-1"', page.get_data(as_text=True))
-        with patch.dict("os.environ", {"SHOWCASE_HOME": "0"}):
-            page = self.client.get("/", base_url=self.base).get_data(as_text=True)
-            self.assertIn("/static/architecture.svg", page)
-        page = self.client.get("/tools", base_url=self.base).get_data(as_text=True)
-        self.assertIn("/static/architecture.svg", page)
+        page = self.client.get("/", base_url=self.base)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="asset-hvac-1"', page.get_data(as_text=True))
+        self.assertEqual(self.client.get("/uns", base_url=self.base).status_code, 200)
+        for path in ("/showcase", "/console", "/tools"):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path, base_url=self.base).status_code, 404)
+                self.assertNotIn(f'href="{path}"', page.get_data(as_text=True))
 
 
 if __name__ == "__main__":

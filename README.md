@@ -14,53 +14,46 @@ shop-floor OPC UA and brownfield building-automation BACnet side-by-side.
 
 ## Quick start
 
-Install Docker with Docker Compose and [uv](https://docs.astral.sh/uv/)
-for the provisioning and command-line helpers. Run these commands from the
-repository root:
+Install Docker with Docker Compose and [uv](https://docs.astral.sh/uv/).
+The setup helpers also require `make`, `python3` and `openssl` on your PATH.
+Run these commands from the repository root:
 
 ```bash
-make up           # generate private local credentials, then build/start
-# wait ~30s for the neurons to finish first-boot init
-make provision    # configure Neuron, viewers, database grants and retention
+make up           # generate local credentials, then build and start the stack
+make provision    # configure gateways, viewers, database grants and retention
 ```
 
 After provisioning, open <http://localhost:8080> and wait for **Device data live**:
-both CNCs and the HVAC unit must have fresh telemetry. Each browser gets its own
-signed visitor session; each device has its own claim queue.
-`make help` lists the available targets.
+both CNCs and the HVAC unit must have fresh telemetry. Provisioning retries
+while Neuron starts; first boot can take about 30 seconds. `make help` lists
+the available targets.
 
 App images are pinned to EMQX 6.3.2, EMQX Neuron 4.0.0, Grafana 13.2.2, and
 TimescaleDB 2.30.1 on PostgreSQL 17.
 
 ## Live demo
 
-The home page shows individual CNC and HVAC devices, their Neuron gateways,
-the EMQX namespace, and enterprise applications. Data flows upward; MES
-commands return to the addressed CNC. The enterprise/cloud tier represents
-the application layer; all services in the local demo run in Docker.
-Equipment is simulated; protocol acquisition, MQTT distribution, MES
-commands and state changes use the running stack. Device controls,
-per-device claim queues, an ERP batch button and two live MQTT traffic
-panes are on the same page, also at `/showcase`. **Tools** opens the
-individual applications. All published service ports bind to `127.0.0.1`
-for local access.
+The home page combines device controls, ERP batch orders and live MQTT traffic.
+Equipment is simulated; OPC UA/BACnet acquisition, MQTT, MES execution and
+database storage use the running services. All services, including the
+application tier drawn above EMQX, run locally in Docker.
 
-Once the stack is running:
+**Tools** opens the product UIs. **Namespace** opens the MQTT topic tree.
+Direct links, once the stack is running:
 
-- **Live showcase** — <http://localhost:8080/showcase> (device controls, ERP orders and MQTT traffic)
-- **Demo home** — <http://localhost:8080> (live device-to-cloud map and interactive controls)
-- **Demo tools** — <http://localhost:8080/tools> (architecture reference and product links)
-- **Operator console** — <http://localhost:8080/console> (redirects to the interactive home)
+- **Namespace** — <http://localhost:8080/uns>
 - **MES** — <http://localhost:8090> (read-only batch execution view)
 - **Grafana** — <http://localhost:3000/d/production-overview> (machining) / <http://localhost:3000/d/facility-hvac> (HVAC)
 - **EMQX dashboard** — <http://localhost:18083> (viewer / demo-viewer)
-- **Neuron UI** — neuron-1 OPC UA <http://localhost:8085>, neuron-2 OPC UA <http://localhost:8086>, neuron-3 BACnet/IP <http://localhost:8087> (viewer / demo-viewer)
+- **EMQX Neuron** — CNC 01 <http://localhost:8085>, CNC 02 <http://localhost:8086>, HVAC <http://localhost:8087> (viewer / demo-viewer)
 
-Administrator passwords and service credentials are generated once in the
-gitignored `.env` file. `make security-init` preserves existing secrets.
-The public Viewer password is deliberately shareable and grants no writes.
-Grafana uses anonymous Viewer access with a dedicated database role that
-can only SELECT from the three demo history tables.
+The base Compose stack binds published ports to `127.0.0.1`. EMQX, Neuron
+and Grafana administrator passwords and MQTT service passwords are generated
+in the gitignored `.env`; broker files and the MQTT signing key are stored
+in the gitignored `.runtime/`. `make security-init` preserves existing secrets.
+The shared `viewer / demo-viewer` accounts are read-only. Grafana uses
+anonymous Viewer access and a database role restricted to reading the three
+demo history tables.
 
 ### Testing with separate browsers
 
@@ -70,29 +63,37 @@ can only SELECT from the three demo history tables.
    `cmd/req`, gateway `cmd/ack`, and changed spindle reading. The spindle
    setting is bounded to 0–6,000 rpm and only applies outside MES batches.
 3. In browser B, **Join queue** on CNC 01. Its controls remain disabled
-   until A releases or expires, the defaults are restored, and B reaches
-   the front of the queue. B can instead claim HVAC or CNC 02 independently.
-4. Claim HVAC to change temperature (18–28 °C), fan speed (0–100%), mode
-   and enable state. Commands travel through Neuron over BACnet/IP.
-5. Use **Send batch** on ERP to queue one part on the selected CNC.
+   until A releases or expires and the device defaults are restored.
+   **Leave queue** lets B cancel and choose another device.
+4. In browser A, **Release** CNC 01. Watch B receive control with the
+   spindle stopped, then release it in B as well.
+5. Claim HVAC to change temperature (18–28 °C), fan speed (0–100%), mode
+   and power. Click **Apply** to send the settings through Neuron over
+   BACnet/IP, then **Release** before trying an ERP order.
+6. Use **Send batch** on ERP to queue one part on the selected CNC.
    MES first acknowledges the reservation, then runs the selected recipe.
    The submitting browser can Hold, Resume, inject/clear a fault or End batch
    from that CNC's card. Other browsers cannot change its settings.
-6. Sign into EMQX and Neuron with `viewer / demo-viewer`: reads work, writes
-   are rejected. Direct MES API writes and browser MQTT publishing are denied.
+7. Sign into EMQX and Neuron with `viewer / demo-viewer`: reads work, writes
+   are rejected. Public visitors cannot write through the MES API or publish
+   directly to MQTT.
+
+### Limits and access
 
 Each device allows one active reservation and at most three waiting requests.
 Each browser may have only one active or waiting request across all devices.
 Manual claims last 30 seconds; abandoned manual claims and waiting requests
-expire after 20 seconds without polling. ERP reservations last through batch
+expire after 20 seconds without polling. Waiting requests also expire after
+10 minutes even if the browser stays open. ERP reservations last through batch
 completion, with a 90-second cap. A batch continues if its browser closes.
 Expired, released or restarted claims restore device defaults before handoff;
 CNC spindle deadlines are also enforced locally by the PLC simulator.
 
-Anonymous sessions have admission limits of 6 requests/minute per browser,
-15/minute per IP and 40/minute globally. Writes are limited to 8 per 5 seconds
-per visitor and one unconfirmed setting change per device. Status snapshots
-need no claim, but are limited to 6 per 10 seconds per visitor and 90/minute
+Claim and ERP submissions are limited to 6 requests/minute per browser,
+15/minute per IP and 40/minute globally. State-changing device commands are
+limited to 8 per 5 seconds per visitor and one unconfirmed setting change
+per device. Status snapshots need no claim, but are limited to 6 per 10 seconds
+per visitor and 90/minute
 globally. Full queues and rate limits return HTTP 429 with `Retry-After`.
 
 HTTP controls require a CSRF token; writes also require the owner's unexpired
@@ -114,13 +115,11 @@ and topic ACLs. The namespace tree and traffic panes are real MQTT subscribers.
 
 ![Architecture](services/operator/static/architecture.svg)
 
-The same diagram is available on the [demo tools page](http://localhost:8080/tools).
-
 </details>
 
 ```
 docker-compose.yml             EMQX + 2 PLCs + 1 HVAC + 3 neurons + MES + operator + storage
-services/operator/             Flask: ERP "place order" panel + PLC/order status
+services/operator/             Flask: interactive controls, device claims, MQTT traffic and namespace tree
 services/mes-sim/              Python: state-machine MES, web UI for batches in flight
 services/plc-sim/              Python: OPC UA machining-cell PLC, command-driven
 services/hvac-sim/             Python: BACnet/IP rooftop AHU simulator (bacpypes3)
@@ -128,18 +127,19 @@ emqx/base.hocon                rule engine + Timescale sinks (plc + hvac)
 timescale/init.sql             plc_telemetry + hvac_telemetry hypertables + batches table
 grafana/                       provisioned datasource + production-overview + facility-hvac dashboards
 tools/provision_neuron.py      REST-API neuron provisioning (OPC UA on neuron-1/2, BACnet on neuron-3)
-tools/place_order.py           dev helper: publish a JSON order from the CLI
+tools/provision_security.py    product viewers, Grafana database grants and retention
+tools/init_security.py         local credentials, MQTT signing key and broker ACLs
 ```
 
 ## Operating the demo
 
 ### Commands and live traffic
 
-There is no walkthrough to start. Use the controls on device cards, or the
-ERP button for a complete `program-a` or `program-quick` batch. The quick
-program skips finish machining. An ERP order joins the selected CNC's queue
-and holds that device until the order ends. MES cannot allocate a machine
-that has a manual claim, and manual settings cannot alter a reserved batch.
+ERP offers **Full program** (`program-a`: load → rough → finish → unload)
+and **Quick program** (`program-quick`: load → rough → unload). An ERP order
+joins the selected CNC's queue and reserves it for the batch. MES cannot
+allocate a machine that has a manual claim, and manual settings cannot
+alter a reserved batch. HVAC is independent of MES production allocation.
 
 The right side has two independent displays:
 
@@ -153,47 +153,40 @@ The right side has two independent displays:
 Each pane lists its actual MQTT subscription filters and has Pause/Clear.
 Use each row's **JSON ›** disclosure to inspect its full topic and payload.
 Pausing freezes that display and shows **Paused**; it does not pause devices.
-Retained messages say **retained · on connect**, rather than showing a new event
-time. A successful gateway
+Retained messages say **retained · on connect**. A successful gateway
 acknowledgement means the write was accepted; the card reports success only
 after the requested values appear in fresh telemetry.
 
 **Status** publishes a request and a response containing the latest observed
-telemetry, with its timestamp and freshness. It is explicitly a cached status
-snapshot, not a fresh on-demand OPC UA or BACnet read.
-The reply appears on the device, including when its MQTT viewer is paused or
-active in another tab. Settings are labelled as targets and show ranges until
-claimed; measured values remain separate. Queue badges appear only when relevant.
+telemetry, with its timestamp and freshness. This is a cached snapshot; it
+does not trigger a new OPC UA or BACnet read. The reply also appears on the
+device card when its MQTT viewer is paused or active in another tab.
 
 **Device data live** describes backend device monitoring. Each MQTT pane separately
-shows its browser subscription state. The existing one-viewer-per-browser/view
-limit also applies across tabs: a displaced viewer shows **Other tab** and
-**Watch here** moves the feed back, without reconnect loops or broader permissions.
+shows its browser subscription state. Tabs in the same browser profile share
+one MQTT viewer for the home page and one for the namespace tree. A displaced
+viewer shows **Other tab**; **Watch here** moves the feed back to that tab.
 
 Blue paths carry telemetry/events; purple paths carry orders/commands. Highlighted
 paths reflect recently observed MQTT messages, not exact network transit times. The
 larger device dots show telemetry freshness; claim buttons show control ownership
-and the remaining turn time. An idle
-machine can have fresh readings; a connected broker alone does not prove that
-a device is healthy. HVAC remains outside the MES production allocation pool.
+and the remaining turn time. An idle machine can have fresh readings;
+a connected broker alone does not prove that a device is healthy.
 
 ### Release and recovery
 
 **Release** ends your manual claim. **End batch** cancels your own ERP order
 through MQTT → MES → Neuron → OPC UA. Both wait for confirmed device recovery
 before the next visitor receives control. CNC defaults are spindle stopped;
-HVAC defaults are 22 °C, 50% fan, Auto mode and Enabled. History is preserved.
+HVAC defaults are 22 °C, 50% fan, Auto mode and Power On. History is preserved.
 
 Claims persist in SQLite. After an operator restart, active claims recover
 before accepting further writes; waiting requests are cancelled. If a gateway
 is offline, recovery waits for its write acknowledgement and fresh default
 values. Restore connectivity to resume that device's queue.
 
-The private local `make booth-reset` helper recovers active claims. The older
-`make booth-loop` diagnostic is operator-only and cannot start while claims
-are active or queued; it has no public UI. `make place-order` is a privileged
-CLI diagnostic that bypasses the browser queue but still respects device
-reservations and bounded MES admission.
+For operator recovery, `make booth-reset` uses the private local administrator
+key to recover active claims while preserving database history.
 
 | Symptom | What to check |
 | --- | --- |
@@ -215,12 +208,14 @@ curl -i http://localhost:8080/readyz
 
 ## Configuration
 
-Set `SHOWCASE_TITLE` and `SHOWCASE_EVENT` in `.env` to customize the title.
-Compose accepts `ENTERPRISE`, `SITE` and `LINE` for the topic namespace.
-The security initializer and provisioners also read `.env`; shell values take
-precedence. Keep machining/utilities areas consistent with the broker rules.
-The provisioner accepts `NEURON_API_1` through `NEURON_API_3` for alternative
-Neuron endpoints and `BACNET_HOST` for the HVAC device's numeric IP.
+Use `.env` for shared configuration. `SHOWCASE_TITLE` changes the browser-tab
+title. `ENTERPRISE`, `SITE` and `LINE` set the MQTT namespace, with defaults
+`acme-mfg`, `plant-1` and `line-1`. CNCs use the fixed area `machining`;
+HVAC uses `utilities/compressor-room` to match the broker rules and controls.
+
+The provisioners read `.env`, with shell values taking precedence. The Neuron
+provisioner accepts `NEURON_API_1` through `NEURON_API_3` as `host:port` values
+and `BACNET_HOST` as the HVAC device's numeric IP.
 
 `CLAIM_SECONDS` (30), `BATCH_SECONDS` (90) and `DEVICE_QUEUE_SIZE` (3) can be
 set in `.env`, then applied with `make up`. Keep manual claims at or below
@@ -228,15 +223,26 @@ set in `.env`, then applied with `make up`. Keep manual claims at or below
 process: the supplied server uses one scheduler and eight HTTP threads.
 
 MES has two fixed workers and a three-order backlog, validates order expiry,
-persists deduplication, and aborts orphaned batches after restart. Batch IDs
+persists deduplication, and marks interrupted orders failed after restart. Batch IDs
 are UUIDs; in-memory batch history is capped at 100. Retained messages expire
 after a day, telemetry after seven days and database batch records after 30 days.
 
-The optional hosted profile uses Caddy and the same restrictions. Create
-`.env.booth` with `uv run tools/booth_credentials.py factory.example.com`,
-configure the domain and product subdomains, then `make booth-up`. It requires
-HTTPS cookies and adds a shared entrance password. Local testing needs neither
-a domain nor HTTPS. The hosted profile has not been deployed by this change.
+### Optional HTTPS hosting
+
+The hosted profile adds Caddy, HTTPS cookies and a shared entrance password
+to the same restrictions. Point a dedicated demo hostname and its `mes`,
+`grafana`, `emqx`, `neuron-1`, `neuron-2` and `neuron-3` subdomains at the host.
+Allow inbound ports 80 and 443, then run:
+
+```bash
+uv run tools/booth_credentials.py factory.example.com  # use your own hostname
+make booth-up
+make provision
+```
+
+The credential helper prompts for the entrance password and creates a private
+`.env.booth`. Local testing uses the base Compose stack and needs no domain
+or HTTPS.
 
 ## Checking the demo
 
@@ -272,51 +278,17 @@ acme-mfg/<site>/machining/<line>/<plc>/control/reservation               # Retai
 acme-mfg/<site>/machining/<line>/<plc>/control/reservation/ack           # MES reservation acknowledgement
 ```
 
-Defaults: `ENTERPRISE=acme-mfg`, `SITE=plant-1`, `LINE=line-1`.
-The CNC area is fixed to `machining` in Compose and provisioning to match
-the broker rules. HVAC uses `utilities/compressor-room`.
-
-## Upgrading an existing installation
-
-Neuron 4.0.0 uses fresh `neuron-1-v4-data`, `neuron-2-v4-data` and
-`neuron-3-v4-data` volumes. Existing 3.x volumes are left intact; `make provision`
-recreates this demo's drivers and tags in 4.0. Any extra manually configured
-drivers or licenses must be exported/backed up separately before migration.
-[Automatic migration from 3.x starts with 4.0.1](https://docs.emqx.com/en/neuronex/latest/installation/upgrade-4.0.html),
-so this repository does not mount a legacy volume into the requested 4.0.0 image.
-
-Neuron 4.0.0 also subscribes to the legacy `neuron/uns-mqtt/read/req`
-topic even with a configured driver topic prefix. The gateway ACLs allow
-this subscription; visitor and application identities cannot publish there.
-Demo writes continue through the scoped `.../<device>/cmd/req` topics.
-
-Back up the database and `grafana-data` volume first. [Grafana 13 migrates
-dashboard storage](https://grafana.com/docs/grafana/latest/upgrade-guide/upgrade-v13.0/),
-so rolling back requires restoring the backup. PostgreSQL stays on major
-version 17 to preserve data-volume compatibility.
-
-```bash
-make security-init
-docker compose pull
-docker compose build --pull
-docker compose up -d
-docker compose exec timescaledb psql -X -U demo -d demo -v ON_ERROR_STOP=1 \
-  -c 'ALTER EXTENSION timescaledb UPDATE;'
-make provision
-```
-
-The extension update is required for an existing TimescaleDB database;
-fresh volumes install the current extension automatically.
+`acme-mfg` is the default enterprise placeholder; set `ENTERPRISE` to change it.
 
 ## Stopping or rebuilding from scratch
 
-`make down` stops the services and preserves their named volumes. Use
+For the local stack, `make down` stops the services and preserves their named volumes. Use
 `make up` to start them again.
 
-For a fresh installation, the following commands **delete all demo volumes**,
-including database history, Grafana state and Neuron configuration, then
-recreate and provision the stack. Use **Release** or **End batch** for ordinary
-repeated demonstrations.
+To erase an existing local stack, the following commands **delete its named
+volumes**, including database history, claims, Grafana state and current
+Neuron configuration, then recreate and provision it. The `.env` and
+`.runtime/` files remain. Use **Release** or **End batch** for ordinary turns.
 
 ```bash
 make reset

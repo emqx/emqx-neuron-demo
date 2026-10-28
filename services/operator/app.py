@@ -2,13 +2,10 @@
 # requires-python = ">=3.11"
 # dependencies = ["flask==3.1.3", "paho-mqtt==2.1.0", "waitress==3.0.2", "PyJWT[crypto]==2.10.1"]
 # ///
-"""Operator console.
+"""Interactive factory demo.
 
 Routes:
     /          — live factory map, device claims, ERP orders and MQTT traffic
-    /showcase  — alias for the interactive demo
-    /tools     — product links and architecture
-    /console   — compatibility redirect to the interactive demo
     /uns       — live MQTT-topic tree (connects to EMQX WS directly)
     /api/*     — operator and showcase controls
     /login     — optional hosted session login
@@ -186,17 +183,17 @@ def links():
 
 def safe_next(value):
     if not value or "\\" in value or any(ord(c) < 32 for c in value):
-        return PUBLIC_BASE + "/showcase"
+        return PUBLIC_BASE + "/"
     if value.startswith("/") and not value.startswith("//"):
         return (PUBLIC_BASE or "") + value
     allowed = {urlsplit(PUBLIC_BASE).netloc, *(urlsplit(v).netloc for v in links().values())}
     try:
         parsed = urlsplit(value)
     except ValueError:
-        return PUBLIC_BASE + "/showcase"
+        return PUBLIC_BASE + "/"
     if parsed.scheme == urlsplit(PUBLIC_BASE).scheme and parsed.netloc in allowed and not parsed.username:
         return value
-    return PUBLIC_BASE + "/showcase"
+    return PUBLIC_BASE + "/"
 
 
 def login_redirect(target):
@@ -308,7 +305,7 @@ def response_headers(response):
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if not PASSWORD_HASH:
-        return redirect("/showcase")
+        return redirect("/")
     target = safe_next(request.values.get("next"))
     error = None
     status = 200
@@ -349,7 +346,7 @@ def auth_check():
     if not PASSWORD_HASH or session.get("authenticated"):
         return "", 204
     host = request.headers.get("X-Forwarded-Host", request.host)
-    uri = request.headers.get("X-Forwarded-Uri", "/showcase")
+    uri = request.headers.get("X-Forwarded-Uri", "/")
     scheme = urlsplit(PUBLIC_BASE).scheme or request.scheme
     return login_redirect(f"{scheme}://{host}{uri}")
 
@@ -365,11 +362,6 @@ def template_config():
         "title": os.getenv("SHOWCASE_TITLE", "From shop floor to cloud."),
         "event": os.getenv("SHOWCASE_EVENT", "Live manufacturing demonstration"),
     }}
-
-
-@app.get("/showcase")
-def showcase_page():
-    return render_template("showcase.html")
 
 
 @app.get("/api/showcase")
@@ -503,11 +495,6 @@ def api_command():
     return jsonify(error="Use the controls on your reserved device."), 403
 
 
-@app.get("/console")
-def console():
-    return redirect("/showcase")
-
-
 @app.get("/uns")
 def uns():
     return render_template("uns.html")
@@ -515,12 +502,7 @@ def uns():
 
 @app.get("/")
 def index():
-    return render_template("index.html" if os.getenv("SHOWCASE_HOME") == "0" else "showcase.html")
-
-
-@app.get("/tools")
-def tools_page():
-    return render_template("index.html")
+    return render_template("showcase.html")
 
 
 def main() -> None:

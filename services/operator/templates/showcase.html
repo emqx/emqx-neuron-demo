@@ -28,7 +28,6 @@
       {% for number in [1,2,3] %}<a href="{{ links['neuron_' ~ number] }}" target="_blank" rel="noopener">Neuron {{ '%02d' | format(number) }} ↗</a>{% endfor %}
       <a href="{{ links.grafana }}d/production-overview" target="_blank" rel="noopener">Production history ↗</a>
       <a href="{{ links.grafana }}d/facility-hvac" target="_blank" rel="noopener">HVAC history ↗</a>
-      <a href="/tools">Architecture &amp; tools ↗</a>
     </div>
   </header>
   <div class="notice" id="notice" role="alert" hidden><span id="notice-message"></span><button id="dismiss-notice" aria-label="Dismiss message">×</button></div>
