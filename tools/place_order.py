@@ -15,9 +15,11 @@ import json
 import sys
 import time
 import uuid
+import os
 from datetime import datetime, timezone
 
 import paho.mqtt.publish as publish
+from init_security import load_env
 
 
 def utc_now() -> str:
@@ -41,10 +43,13 @@ def main() -> int:
         "recipe_id": args.recipe,
         "qty": args.qty,
         "placed_at": utc_now(),
+        "expires_at": time.time() + 20,
     }
     topic = f"{args.enterprise}/{args.site}/orders/{order_id}"
-    publish.single(topic, json.dumps(payload), qos=1, retain=True,
-                   hostname=args.host, port=args.port)
+    env = {**load_env(), **os.environ}
+    publish.single(topic, json.dumps(payload), qos=1, retain=False,
+                   hostname=args.host, port=args.port,
+                   auth={"username": "operator", "password": env["MQTT_OPERATOR_PASSWORD"]})
     print(f"placed: {topic}")
     print(json.dumps(payload, indent=2))
     return 0

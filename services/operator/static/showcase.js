@@ -1,282 +1,451 @@
 'use strict';
 const config = JSON.parse(document.getElementById('demo-config').textContent);
+const UI = window.FactoryUI;
+const names = UI.names;
 const $ = id => document.getElementById(id);
-const set = (id, text) => { $(id).textContent = text; };
-let state = null;
-let client = null;
-let clientConnected = false;
-let subscriberCount = 0;
-let liveCount = 0;
-let retainedCount = 0;
-let powers = {};
-let points = [];
-let lastPointAt = 0;
-let lastCycle = null;
-let lastReset = null;
-let autoAttached = null;
-let shownEvent = null;
-let requestPending = false;
-let clockOffset = 0;
+const cardFor = device => $('asset-' + device);
+const commandFilters = ['orders/+', 'orders/+/status', 'batches/+/record', '+/+/+/cmd/+',
+  '+/+/+/control/#', '+/+/+/_demo/fault', '+/+/+/batch/+/phase/+/command', '+/+/+/state', '+/+/+/state-events']
+  .map(suffix => config.prefix + '/' + suffix);
+const telemetryFilter = config.prefix + '/+/+/+/telemetry';
+const paused = {commands: false, telemetry: false};
+const feeds = {
+  commands: {lastMessage: 0, count: 0, rate: 0, subscribed: false, refused: []},
+  telemetry: {lastMessage: 0, count: 0, rate: 0, subscribed: false, refused: []},
+};
+const feedback = new Map(), commandFeedback = new Map(), previousClaims = new Map(), inputLeases = new Map();
+const turnHighlights = new Map(), ownRequests = new Map(), reservationStates = new Map(), retainedRows = new Map();
+let state = null, pending = false, pollConnected = false, mqttClient = null, viewerPhase = 'connecting';
+let telemetryLatest = new Map(), orderFeedback = null;
 
-function notice(message) {
-  $('notice').hidden = !message;
-  $('notice').textContent = message || '';
+function text(node, value) {
+  value = String(value ?? '');
+  if (node.textContent !== value) node.textContent = value;
+}
+function announce(message) { text($('announcements'), message); }
+function actionText(button, label) {
+  const release = /^Release · (\d+)s$/.exec(label);
+  if (!release) { text(button, label); return; }
+  let timer = button.querySelector('[data-timer]');
+  if (!timer) {
+    timer = document.createElement('span');
+    timer.dataset.timer = '';
+    timer.setAttribute('aria-hidden', 'true');
+    button.replaceChildren(document.createTextNode('Release'), timer);
+  }
+  text(timer, ` · ${release[1]}s`);
+}
+function notice(message) { $('notice').hidden = !message; text($('notice-message'), message); }
+function blocked(button, reason) {
+  button.disabled = false;
+  button.setAttribute('aria-disabled', String(!!reason));
+  button.dataset.reason = reason || '';
+}
+function showFeedback(device, message, kind = 'info', seconds = 7) {
+  feedback.set(device, {text: message, kind, until: Date.now() + seconds * 1000});
+  paintFeedback(device);
+}
+function paintFeedback(device) {
+  const card = cardFor(device), local = feedback.get(device), command = commandFeedback.get(device);
+  const item = local?.until > Date.now() ? local : state?.visitor.devices[device].mine && command?.until > Date.now() ? command : null;
+  const result = card.querySelector('[data-command-result]');
+  result.hidden = !item;
+  result.dataset.kind = item?.kind || 'info';
+  text(result, item?.text || '');
+  // A transient reply replaces the overlay chip, keeping the illustration
+  // region usable even in a short window. The heading action stays visible.
+  card.querySelector('[data-claim-badge]').hidden = !!item || !card.dataset.claimBadge;
+}
+function showOrderFeedback(message) {
+  orderFeedback = {text: message, until: Date.now() + 8000};
+  if (state) render(state);
 }
 
-async function action(name, body = {}) {
-  if (requestPending) return;
-  requestPending = true;
+async function post(path, body = {}, device = null) {
+  if (pending || !state || !pollConnected) {
+    const reason = pending ? 'Waiting for the previous request.' : 'Factory connection unavailable.';
+    if (device) showFeedback(device, reason); else showOrderFeedback(reason);
+    return null;
+  }
+  const requestId = crypto.randomUUID();
+  ownRequests.set(requestId, device);
+  if (ownRequests.size > 100) ownRequests.delete(ownRequests.keys().next().value);
+  pending = true;
+  render(state);
   try {
-    const response = await fetch('/api/demo/' + name, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body), signal: AbortSignal.timeout(10000),
+    const response = await fetch(path, {
+      method: 'POST', headers: {'Content-Type': 'application/json', 'X-Demo-CSRF': state.visitor.csrf},
+      body: JSON.stringify({request_id: requestId, ...body}), signal: AbortSignal.timeout(10000),
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'The action could not be completed.');
+    if (!response.ok) throw new Error(result.error || 'The request could not be completed.');
     notice('');
-  } catch (error) { notice(error.message); }
-  finally { requestPending = false; }
+    return result;
+  } catch (error) {
+    const message = error.name === 'TimeoutError' ? 'Request timed out. Check the device state before retrying.' : error.message;
+    if (device) showFeedback(device, message, 'error', 12); else showOrderFeedback(message);
+    return null;
+  } finally {
+    pending = false;
+    if (state) render(state);
+  }
+}
+async function deviceCommand(device, action, values = {}) {
+  const plc = state?.plcs[device] || {};
+  if (action === 'status') showFeedback(device, 'Requesting snapshot…', 'info', 12);
+  else feedback.delete(device);
+  const result = await post(`/api/devices/${device}/command`, {action, ...values,
+    lease_id: state?.visitor.devices[device].lease_id, batch_id: plc.batch_id, phase: plc.phase}, device);
+  if (result?.snapshot) showFeedback(device, UI.snapshotSummary(device, result.snapshot), 'snapshot', 8);
 }
 
-function formatNumber(value, decimals = 0) {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? value.toLocaleString(undefined, {maximumFractionDigits: decimals, minimumFractionDigits: decimals}) : '—';
+function updateInputs(device, claim, values) {
+  const inputs = cardFor(device).querySelectorAll('[data-settings] input, [data-settings] select');
+  if (!claim.mine || claim.kind === 'batch') {
+    inputs.forEach(input => { input.value = ''; });
+    inputLeases.delete(device);
+  } else if (claim.owned && inputLeases.get(device) !== claim.lease_id) {
+    const proposed = device === 'hvac-1'
+      ? {temperature: values.temp_setpoint_c ?? 22, fan: values.fan_speed_pct ?? 50, mode: values.mode_cmd ?? 5, enabled: values.enable_cmd ?? 1}
+      : {rpm: values.manual_rpm > 0 ? values.manual_rpm : 1500};
+    inputs.forEach(input => { input.value = String(proposed[input.name]); });
+    inputLeases.set(device, claim.lease_id);
+  }
 }
 
 function render(data) {
   state = data;
-  clockOffset = data.server_time * 1000 - Date.now();
-  const scene = data.scene;
-  const stale = !data.ready;
-  $('connection').className = 'connection ' + (stale ? 'bad' : 'good');
-  $('connection').replaceChildren(Object.assign(document.createElement('i'), {}),
-    document.createTextNode(!data.connected ? 'Broker disconnected' : stale ? 'Waiting for fresh data' : 'All sources live'));
-  set('story-step', scene.loop ? 'AUTO LOOP · RUN ' + scene.iteration : scene.step === 'ready' ? 'READY TO EXPLORE' : 'LIVE WALKTHROUGH · ' + scene.step.toUpperCase());
-  set('story-title', scene.title);
-  set('caption', scene.caption);
-  set('messages', data.messages.toLocaleString() + ' messages observed');
-  const freshCount = Object.values(data.assets).filter(asset => asset.fresh).length;
-  set('sources-count', freshCount + ' of 3 sources live');
-  $('neuron-light').className = freshCount === 3 ? 'good' : '';
-  for (const id of ['plc-1', 'plc-2', 'hvac-1']) {
-    const node = $('asset-' + id), asset = data.assets[id], plc = data.plcs[id] || {};
-    const hvac = id === 'hvac-1';
-    const values = asset?.values || {};
-    const fresh = asset?.fresh;
-    node.classList.toggle('stale', !fresh);
-    node.classList.toggle('fresh', !!fresh);
-    node.classList.toggle('faulted', plc.state === 'faulted');
-    $('gateway-' + id).classList.toggle('live', !!fresh);
-    node.querySelector('[data-metric]').textContent = formatNumber(values[hvac ? 'supply_air_temp_c' : 'spindle_rpm'], hvac ? 1 : 0);
-    node.querySelector('[data-secondary]').textContent = formatNumber(values[hvac ? 'fan_kw' : 'power_kw'], 1) + ' kW';
-    node.querySelector('[data-state]').textContent = !fresh ? (asset?.error ? 'Source read error' : 'No fresh data') :
-      hvac ? (values.unit_running ? 'Ventilation running' : 'Standby') :
-      plc.state === 'faulted' ? 'Over-temperature · paused' : (plc.state || 'idle') + (plc.phase ? ' · ' + plc.phase : '');
-    node.querySelector('[data-age]').textContent = !asset?.received_at ? '—' : asset.age > 60 ? '> 1 min old' : asset.age.toFixed(1) + 's ago';
-  }
-  for (const name of ['acquisition', 'distribution', 'commands']) {
-    $('flow-' + name).classList.toggle('live', !!data.activity[name] && data.connected);
-  }
-  document.querySelectorAll('[data-traffic]').forEach(node => {
-    const active = node.dataset.traffic.split(' ').some(key => data.activity[key]);
-    node.classList.toggle('live', !!active && data.connected);
-  });
-  const plc = data.plcs[scene.plc_id] || {};
-  // A PLC completes each phase; only the order status proves the whole part is complete.
-  const status = data.order.state === 'completed' ? 'completed' : data.order.state === 'failed' ? 'failed' : plc.state === 'completed' ? 'running' : plc.state || 'ready';
-  set('order-state', status);
-  $('order-state').className = 'state-pill ' + status;
-  set('order-phase', status === 'completed' ? 'Part completed' : status === 'faulted' ? 'Machining paused' : status === 'failed' ? 'Order stopped' : plc.phase ? (plc.phase[0].toUpperCase() + plc.phase.slice(1)) + ' phase' : 'Ready for the next part');
-  set('order-meta', scene.order_id ? scene.order_id + (data.order.batch_id ? ' · ' + data.order.batch_id : '') : 'ERP → MES → machine → completion');
-  const phases = ['load', 'rough', 'finish', 'unload'];
-  document.querySelectorAll('[data-phase]').forEach(node => {
-    const index = phases.indexOf(node.dataset.phase), current = phases.indexOf(plc.phase);
-    node.className = status === 'completed' || current > index ? 'done' : current === index ? 'current' : '';
-  });
-  const stopping = scene.step === 'stopping';
-  $('start').disabled = !data.ready || scene.active || stopping;
-  $('loop').disabled = !data.ready || scene.active || stopping;
-  $('reset').disabled = stopping;
-  $('inject').disabled = !data.ready || !scene.active || plc.state !== 'running' || stopping;
-  $('clear').disabled = !data.connected || plc.state !== 'faulted' || stopping;
-  $('attach').disabled = !data.connected;
+  const visitor = data.visitor, connected = data.connected && pollConnected;
+  const requestDevice = Object.keys(names).find(device => visitor.devices[device].mine || visitor.devices[device].position);
+  const currentRequest = names[requestDevice];
+  $('connection').className = 'connection ' + (connected && data.ready ? 'good' : 'bad');
+  text($('connection-label'), !connected ? 'Device data unavailable' : data.ready ? 'Device data live' : 'Device data stale');
+  $('connection').title = 'Factory monitoring connection · separate from this browser’s MQTT viewer';
 
-  if ((lastReset !== null && data.reset_version !== lastReset) || (scene.cycle && scene.cycle !== lastCycle)) {
-    detachDashboard();
-    autoAttached = null;
-  }
-  lastReset = data.reset_version;
-  lastCycle = scene.cycle;
-  if (scene.attach_dashboard && autoAttached !== scene.cycle) {
-    autoAttached = scene.cycle;
-    attachDashboard();
-  }
-  if (data.sample) {
-    set('sample-topic', data.sample.topic);
-    set('sample-payload', JSON.stringify(data.sample.payload) + '   · unit: rpm');
-    const stamp = data.sample.payload.ts;
-    const age = typeof stamp === 'number' ? data.server_time - stamp / 1000 : Infinity;
-    set('sample-freshness', age < 6 && data.connected ? 'Current value · rpm' : 'Last known value · check source');
-  }
-  const eventKey = data.events[0]?.id || 'empty';
-  if (shownEvent !== eventKey) {
-    shownEvent = eventKey;
-    const rows = data.events.slice(0, 5).map(event => {
-      const li = document.createElement('li'), time = document.createElement('time');
-      time.textContent = new Date(event.time * 1000).toLocaleTimeString();
-      const label = document.createElement('span'); label.className = 'event-label'; label.textContent = event.label;
-      const detail = document.createElement('span'); detail.className = 'event-detail'; detail.textContent = event.detail;
-      li.append(time, label, detail); return li;
-    });
-    if (!rows.length) {
-      const li = document.createElement('li'); li.className = 'empty'; li.textContent = 'Start a walkthrough to follow the order.'; rows.push(li);
+  for (const device of Object.keys(names)) {
+    const card = cardFor(device), asset = data.assets[device] || {}, values = asset.values || {};
+    const plc = data.plcs[device] || {}, claim = visitor.devices[device], previous = previousClaims.get(device);
+    const fresh = connected && !!asset.fresh, batch = claim.mine && claim.kind === 'batch';
+    const machine = UI.machineState(device, {...asset, fresh}, plc);
+    const presentation = UI.claimPresentation(claim, {fresh, connected, reachable: pollConnected, currentRequest, seconds: visitor.claim_seconds});
+    const activeElement = document.activeElement;
+    card.classList.toggle('fresh', fresh);
+    card.classList.toggle('stale', !fresh);
+    card.classList.toggle('claimed', claim.owned);
+    card.classList.toggle('faulted', machine.fault);
+    $('gateway-' + device).classList.toggle('live', fresh);
+    const inFlight = claim.mine && claim.command?.status === 'sent';
+    $('gateway-' + device).classList.toggle('command-pending', inFlight);
+    text(card.querySelector('[data-metric]'), UI.number(values[device === 'hvac-1' ? 'supply_air_temp_c' : 'spindle_rpm'], device === 'hvac-1' ? 1 : 0));
+    text(card.querySelector('[data-state]'), machine.text);
+    const dot = card.querySelector('.asset-status-dot');
+    dot.title = machine.fault ? 'Device fault' : fresh ? 'Fresh device telemetry' : 'Waiting for fresh device telemetry';
+    dot.setAttribute('aria-label', dot.title);
+    text(card.querySelector('[data-claim-state]'), presentation.description + (presentation.reason ? ' ' + presentation.reason : ''));
+
+    if (claim.owned && !previous?.owned && claim.kind === 'manual') {
+      turnHighlights.set(device, Date.now() + 5000);
+      announce(`Your turn on ${names[device]}. ${claim.remaining} seconds of control.`);
+      if (previous) { card.classList.add('new-turn'); setTimeout(() => card.classList.remove('new-turn'), 1000); }
     }
-    $('events').replaceChildren(...rows);
-  }
-  updateDashboard();
-}
+    if (previous?.mine && !claim.mine && !claim.position) {
+      showFeedback(device, 'Turn ended · defaults restored', 'info', 8);
+      commandFeedback.delete(device);
+      announce(`Your turn on ${names[device]} ended. Device defaults restored.`);
+    } else if (claim.position && previous?.position !== claim.position) {
+      announce(`You are number ${claim.position} in the ${names[device]} queue.`);
+    } else if (previous?.position && !claim.position && !claim.mine) {
+      announce(`You left the ${names[device]} queue.`);
+    }
+    const chip = card.querySelector('[data-claim-badge]');
+    const chipText = presentation.badge || (claim.owned && turnHighlights.get(device) > Date.now() ? `Your turn · ${claim.remaining}s` : '');
+    card.dataset.claimBadge = chipText;
+    text(chip, chipText);
+    chip.dataset.kind = claim.owned ? 'mine' : presentation.kind;
 
-function detachDashboard() {
-  const previous = client;
-  client = null;
-  clientConnected = false;
-  if (previous) previous.end(true);
-  subscriberCount = liveCount = retainedCount = 0;
-  powers = {}; points = []; lastPointAt = 0;
-  $('dashboard-empty').hidden = false;
-  $('dashboard-live').hidden = true;
-  $('extra-app').classList.remove('attached');
-  set('power-value', '—');
-  $('spark-line').setAttribute('d', ''); $('spark-fill').setAttribute('d', '');
-}
+    const claimButton = card.querySelector('[data-claim]'), release = card.querySelector('[data-release]');
+    claimButton.hidden = presentation.release;
+    release.hidden = !presentation.release;
+    const actionButton = presentation.release ? release : claimButton;
+    actionText(actionButton, presentation.button);
+    blocked(actionButton, pending ? 'Waiting for the previous request.' : presentation.reason);
+    actionButton.title = presentation.description;
 
-function attachDashboard() {
-  if (client) return;
-  if (!window.mqtt) { notice('The local MQTT browser library is unavailable. Reload the page.'); return; }
-  $('dashboard-empty').hidden = true;
-  $('dashboard-live').hidden = false;
-  $('extra-app').classList.add('attached');
-  set('subscriber-status', 'Connecting a new subscriber…');
-  const current = mqtt.connect(demoConnection(config), {
-    clientId: 'booth-dashboard-' + Math.random().toString(16).slice(2, 10), clean: true,
-    reconnectPeriod: 2000, connectTimeout: 10000,
-  });
-  client = current;
-  current.on('connect', () => {
-    if (client !== current) return;
-    clientConnected = true;
-    // A real, separate subscriber. These values never come from /api/showcase.
-    current.subscribe(config.machinePrefix + '/+/telemetry/power_kw', {qos: 0}, error => {
-      if (error && client === current) set('subscriber-status', 'Subscription failed: ' + error.message);
+    updateInputs(device, claim, values);
+    card.querySelector('[data-settings]').hidden = batch;
+    const writeReason = !connected ? 'Factory connection unavailable.' : !fresh ? 'Waiting for fresh device data.'
+      : !claim.owned ? claim.mine ? presentation.reason : 'Claim this device before changing its settings.'
+        : batch ? 'Use the batch controls while your batch is running.' : inFlight ? 'Waiting for the previous write to confirm.'
+          : pending ? 'Waiting for the previous request.' : '';
+    card.dataset.writeReason = writeReason;
+    card.querySelectorAll('[data-settings] input, [data-settings] select').forEach(input => {
+      input.disabled = !claim.owned || batch || !fresh;
+      if (input.tagName === 'INPUT') input.readOnly = inFlight;
     });
-    updateDashboard();
+    card.querySelectorAll('[data-write]').forEach(button => blocked(button, writeReason));
+    blocked(card.querySelector('[data-action="status"]'), !connected ? 'Factory connection unavailable.' : pending ? 'Waiting for the previous request.' : '');
+    const batchControls = card.querySelector('.batch-controls');
+    if (batchControls) {
+      batchControls.hidden = !batch;
+      const allowed = {hold: ['running'], resume: ['holding'], inject: ['running'], clear: ['faulted']};
+      batchControls.querySelectorAll('button').forEach(button => blocked(button,
+        !claim.owned || !fresh ? 'Waiting for your batch and fresh device data.' : pending ? 'Waiting for the previous request.'
+          : !allowed[button.dataset.action].includes(plc.state) ? `${button.textContent} is unavailable while the batch is ${plc.state || 'starting'}.` : ''));
+    }
+    if (claim.mine && claim.command) {
+      const key = claim.command.id + ':' + claim.command.status;
+      if (commandFeedback.get(device)?.key !== key) commandFeedback.set(device, {
+        key, text: claim.command.status === 'observed' ? '✓ Confirmed in telemetry'
+          : claim.command.status === 'failed' ? claim.command.error : 'Waiting for confirmation…',
+        kind: claim.command.status === 'failed' ? 'error' : 'info',
+        until: Date.now() + (claim.command.status === 'sent' ? 20000 : 8000),
+      });
+    }
+    paintFeedback(device);
+    if (card.contains(activeElement) && ((activeElement === claimButton && claimButton.hidden)
+      || (activeElement === release && release.hidden) || (activeElement.matches('input,select') && activeElement.disabled))) actionButton.focus({preventScroll: true});
+    previousClaims.set(device, {...claim});
+  }
+
+  const selectedDevice = $('order-device').value, selected = visitor.devices[selectedDevice];
+  const orderReason = !connected ? 'Waiting for device data.' : visitor.has_request ? `Finish with ${currentRequest} first.`
+    : selected.waiting >= selected.capacity ? 'Queue full · try another CNC.' : pending ? 'Sending request…' : '';
+  blocked($('send-order'), orderReason);
+  const orderHint = orderFeedback?.until > Date.now() ? orderFeedback.text : orderReason;
+  $('order-hint').hidden = !orderHint;
+  text($('order-hint'), orderHint);
+  $('order-form').closest('.applications').classList.toggle('has-reason', !!orderHint);
+  for (const option of $('order-device').options) text(option, names[option.value] + (visitor.devices[option.value].busy ? ' · in use' : ''));
+  text($('order-summary'), UI.batchSummary(data.orders || []));
+  document.querySelectorAll('[data-traffic]').forEach(node => {
+    node.classList.toggle('live', connected && node.dataset.traffic.split(' ').some(key => data.activity[key]));
   });
-  current.on('message', (topic, payload, packet) => {
-    if (client !== current) return;
-    let sample;
-    try { sample = JSON.parse(payload.toString()); } catch { return; }
-    const asset = topic.split('/')[4];
-    if (!['plc-1', 'plc-2'].includes(asset) || typeof sample.value !== 'number' || !Number.isFinite(sample.value) || typeof sample.ts !== 'number') return;
-    subscriberCount++;
-    if (packet.retain) retainedCount++; else liveCount++;
-    powers[asset] = {value: sample.value, timestamp: sample.ts, received: Date.now()};
-    updateDashboard();
-  });
-  current.on('close', () => { if (client === current) { clientConnected = false; updateDashboard(); } });
-  current.on('error', error => { if (client === current) set('subscriber-status', 'Connection error: ' + error.message); });
 }
 
-function updateDashboard() {
-  if (!client) return;
-  const now = Date.now();
-  const fresh = ['plc-1', 'plc-2'].every(id => powers[id] && now - powers[id].received < 6000 && now + clockOffset - powers[id].timestamp < 6000);
-  if (!clientConnected) {
-    set('subscriber-status', 'Subscriber disconnected · reconnecting…');
-    set('power-value', '—'); return;
+function messageLabel(topic, body) {
+  const device = names[topic.split('/')[4]] || names[body.plc_id];
+  const withDevice = label => device ? `${device} · ${label}` : label;
+  if (topic.endsWith('/cmd/req')) return withDevice('write → Neuron');
+  if (topic.endsWith('/cmd/ack')) return withDevice(body.error === 0 ? 'write acknowledged' : 'write rejected');
+  if (topic.endsWith('/control/request')) return `${ownRequests.has(body.id) ? 'You' : 'Visitor'} → ${device || 'device'} · ${body.action === 'rpm' ? 'set RPM' : body.action === 'hvac' ? 'set HVAC' : body.action}`;
+  if (topic.endsWith('/control/response')) return withDevice('snapshot · ' + (body.fresh ? 'fresh' : 'stale'));
+  if (topic.endsWith('/control/reservation/ack')) return withDevice(body.accepted ? 'MES reservation accepted' : 'MES · device busy');
+  if (topic.endsWith('/control/reservation')) return withDevice(body.release ? 'reservation released' : 'reservation requested');
+  if (topic.endsWith('/control/released')) return withDevice('defaults restored');
+  if (topic.endsWith('/status')) return withDevice('MES · order ' + (body.state || 'updated'));
+  if (topic.includes('/orders/')) return withDevice(body.cancel ? 'ERP · end batch' : 'ERP → MES · batch order');
+  if (topic.endsWith('/record')) return withDevice('MES · batch record');
+  if (topic.endsWith('/command')) return withDevice('MES → ' + (body.action || 'command'));
+  if (topic.endsWith('/_demo/fault')) return withDevice(body.action + ' fault');
+  if (topic.endsWith('/state-events')) return withDevice('device event');
+  return withDevice(UI.title(body.state || 'state'));
+}
+
+function addMessage(log, item, telemetry = false) {
+  const key = item.topic + ':' + JSON.stringify(item.body);
+  if (item.retained) {
+    const previous = retainedRows.get(item.topic);
+    if (previous?.key === key && previous.row.isConnected) return;
+    if (previous?.retained) previous.row.remove();
   }
-  if (!fresh) {
-    set('power-value', '—');
-    set('subscriber-status', subscriberCount ? 'Subscribed · waiting for fresh readings from both CNCs' : 'Subscribed · waiting for machine power data'); return;
+  log.querySelector('.empty')?.remove();
+  const nearBottom = log.scrollHeight - log.clientHeight - log.scrollTop < 50;
+  const row = document.createElement('li');
+  row.className = 'packet ' + (telemetry ? 'telemetry-packet' : item.topic.endsWith('/cmd/req') || item.topic.endsWith('/control/request') ? 'outgoing' : 'incoming');
+  row.classList.toggle('your-message', ownRequests.has(item.body.id || item.body.uuid));
+  const details = document.createElement('details'), summary = document.createElement('summary');
+  const heading = document.createElement('span'); heading.className = 'packet-heading';
+  const name = document.createElement('strong'), time = document.createElement('time');
+  name.textContent = telemetry ? names[item.topic.split('/')[4]] + ' · telemetry' : messageLabel(item.topic, item.body);
+  time.textContent = item.retained ? 'retained · on connect' : new Date(item.time).toLocaleTimeString();
+  time.title = item.retained ? 'Previously retained state delivered when this viewer subscribed.' : 'Received by this viewer';
+  heading.append(name, time);
+  const metadata = document.createElement('span'); metadata.className = 'packet-meta';
+  const topic = document.createElement('code'); topic.className = 'packet-topic';
+  topic.textContent = item.topic.startsWith(config.prefix + '/') ? '…/' + item.topic.slice(config.prefix.length + 1) : item.topic;
+  topic.title = item.topic;
+  const cue = document.createElement('span'); cue.className = 'json-cue'; cue.setAttribute('aria-hidden', 'true');
+  cue.append(document.createTextNode('JSON '));
+  const chevron = document.createElement('span'); chevron.textContent = '›'; cue.append(chevron);
+  metadata.append(topic, cue);
+  const brief = document.createElement('span'); brief.className = 'packet-brief';
+  const values = item.body.values || {};
+  brief.textContent = telemetry ? typeof values.spindle_rpm === 'number'
+    ? `${UI.number(values.spindle_rpm)} rpm · ${UI.number(values.power_kw, 1)} kW · ${UI.title(values.state || '')}`
+    : `${UI.number(values.supply_air_temp_c, 1)} °C · fan ${UI.number(values.fan_speed_pct)}% · ${UI.number(values.fan_kw, 1)} kW`
+    : UI.writeSummary(item.body) || (item.body.phase ? 'Phase · ' + UI.title(item.body.phase) : '');
+  brief.hidden = !brief.textContent;
+  summary.append(heading, metadata, brief);
+  const fullTopic = document.createElement('code'); fullTopic.className = 'full-topic'; fullTopic.textContent = item.topic;
+  const payload = document.createElement('pre'); payload.textContent = JSON.stringify(item.body, null, 2);
+  details.append(summary, fullTopic, payload); row.append(details); log.append(row);
+  // Remember live states too, so replaying their retained copy on reconnect
+  // does not turn the same event into a second history entry.
+  retainedRows.set(item.topic, {key, row, retained: item.retained});
+  if (retainedRows.size > 100) retainedRows.delete(retainedRows.keys().next().value);
+  while (log.children.length > (telemetry ? 60 : 100)) log.firstElementChild.remove();
+  if (nearBottom) log.scrollTop = log.scrollHeight;
+}
+
+function showFilters(id, filters, refused = []) {
+  $(id).replaceChildren(...filters.map(filter => {
+    const code = document.createElement('code'); code.textContent = filter;
+    code.classList.toggle('filter-refused', refused.includes(filter));
+    code.title = refused.includes(filter) ? 'Subscription refused' : filter;
+    return code;
+  }));
+}
+function paintTraffic() {
+  for (const kind of ['commands', 'telemetry']) {
+    const status = UI.feedState({kind, phase: viewerPhase, paused: paused[kind], ...feeds[kind], refused: feeds[kind].refused.length});
+    const node = $(kind === 'commands' ? 'commands-state' : 'telemetry-rate');
+    text(node, status.text); node.dataset.tone = status.tone;
+    node.title = viewerPhase === 'standby' ? 'The bounded MQTT viewer is active in another tab. Choose Watch here to move it here.'
+      : paused[kind] ? 'This message window is paused; device monitoring and controls continue.' : 'This browser’s MQTT feed';
   }
-  const total = powers['plc-1'].value + powers['plc-2'].value;
-  set('power-value', formatNumber(total, 1));
-  set('subscriber-status', liveCount ? `${liveCount} live updates · ${retainedCount} retained values · independent subscriber` : `${retainedCount} retained values received · waiting for live updates`);
-  if (now - lastPointAt > 800) {
-    points.push(total); points = points.slice(-55); lastPointAt = now;
-    const ceiling = Math.max(14, ...points);
-    const d = points.map((v, i) => `${i ? 'L' : 'M'}${i * 320 / 54},${52 - (v / ceiling) * 46}`).join(' ');
-    $('spark-line').setAttribute('d', d);
-    $('spark-fill').setAttribute('d', `${d} L${(points.length - 1) * 320 / 54},56 L0,56 Z`);
+  $('mqtt-light').classList.toggle('live', viewerPhase === 'connected' && feeds.commands.subscribed && !paused.commands);
+  $('watch-here').hidden = viewerPhase !== 'standby';
+  text($('mqtt-status'), viewerPhase === 'standby' ? 'MQTT is watched in another tab. Watch here to move the feed here.'
+    : viewerPhase === 'connected' ? 'MQTT viewer connected. Each message expands to JSON.' : 'MQTT viewer reconnecting. Device monitoring uses a separate connection.');
+}
+
+async function connectTraffic() {
+  try {
+    mqttClient = await demoMqttConnect(config, 'showcase');
+    function subscribe() {
+      viewerPhase = 'connected';
+      const filters = [...commandFilters, telemetryFilter];
+      mqttClient.subscribe(filters, {qos: 1}, (error, granted) => {
+        for (const kind of ['commands', 'telemetry']) {
+          const requested = kind === 'commands' ? commandFilters : [telemetryFilter];
+          feeds[kind].refused = requested.filter(filter => !granted?.some(item => item.topic === filter && item.qos < 128));
+          feeds[kind].subscribed = !!granted?.some(item => requested.includes(item.topic) && item.qos < 128);
+        }
+        text($('command-filter-count'), feeds.commands.refused.length ? `${feeds.commands.refused.length} of ${commandFilters.length} refused ·` : commandFilters.length);
+        $('command-filter-button').classList.toggle('filter-refused', !!feeds.commands.refused.length);
+        $('telemetry-filters').classList.toggle('filter-refused', !!feeds.telemetry.refused.length);
+        showFilters('command-filters', commandFilters, feeds.commands.refused);
+        paintTraffic();
+      });
+      paintTraffic();
+    }
+    mqttClient.on('connect', subscribe);
+    if (mqttClient.connected) subscribe();
+    mqttClient.on('viewer-standby', () => { viewerPhase = 'standby'; paintTraffic(); });
+    mqttClient.on('viewer-resuming', () => { viewerPhase = 'connecting'; paintTraffic(); });
+    mqttClient.on('message', (topic, payload, packet) => {
+      if (!payload.length) return;
+      let body;
+      try { body = JSON.parse(payload.toString()); } catch { return; }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return;
+      const kind = topic.endsWith('/telemetry') ? 'telemetry' : 'commands';
+      feeds[kind].subscribed = true;
+      if (!packet.retain) { feeds[kind].lastMessage = Date.now(); feeds[kind].count++; }
+      if (topic.endsWith('/control/response') && ownRequests.has(body.id)) {
+        const device = names[topic.split('/')[4]] && topic.split('/')[4];
+        if (device) showFeedback(device, UI.snapshotSummary(device, body), 'snapshot', 8);
+      }
+      if (paused[kind]) return;
+      const item = {topic, body, retained: !!packet.retain, time: Date.now()};
+      if (kind === 'telemetry') telemetryLatest.set(topic, item);
+      else {
+        if (topic.includes('/control/reservation')) {
+          const semantic = JSON.stringify([body.id, body.accepted, body.release, body.kind, body.order_id, body.reason]);
+          if (reservationStates.get(topic) === semantic) return;
+          reservationStates.set(topic, semantic);
+          if (reservationStates.size > 30) reservationStates.delete(reservationStates.keys().next().value);
+        }
+        addMessage($('command-log'), item);
+      }
+    });
+    mqttClient.on('close', () => {
+      if (viewerPhase !== 'standby') viewerPhase = 'reconnecting';
+      feeds.commands.subscribed = feeds.telemetry.subscribed = false;
+      telemetryLatest.clear();
+      paintTraffic();
+    });
+    mqttClient.on('error', error => { $('commands-state').title = 'MQTT viewer: ' + error.message; });
+  } catch (error) {
+    viewerPhase = 'reconnecting';
+    paintTraffic();
+    $('commands-state').title = error.message;
+    setTimeout(connectTraffic, 5000);
   }
 }
+setInterval(() => {
+  for (const feed of Object.values(feeds)) { feed.rate = feed.count; feed.count = 0; }
+  if (!paused.telemetry) for (const item of telemetryLatest.values()) addMessage($('telemetry-log'), item, true);
+  telemetryLatest.clear();
+  paintTraffic();
+  for (const device of Object.keys(names)) paintFeedback(device);
+}, 1000);
 
 async function poll() {
   try {
     const response = await fetch('/api/showcase', {cache: 'no-store', signal: AbortSignal.timeout(4500)});
-    if (response.status === 401) {
-      notice('Your demo session has expired. Reload to sign in again.');
-      throw new Error('Session expired');
-    }
-    if (!response.ok) throw new Error('Demo service unavailable');
+    if (!response.ok) throw new Error('Factory connection unavailable');
+    pollConnected = true;
     render(await response.json());
-  } catch (error) {
-    $('connection').className = 'connection bad';
-    $('connection').replaceChildren(document.createElement('i'), document.createTextNode('Demo connection lost'));
-    ['start', 'loop', 'inject', 'clear', 'attach'].forEach(id => { $(id).disabled = true; });
-    document.querySelectorAll('.flow,.return-path,.flow-line,.gateway').forEach(node => node.classList.remove('live'));
-    document.querySelectorAll('.asset').forEach(node => {
-      node.classList.add('stale'); node.classList.remove('fresh');
-      node.querySelector('[data-state]').textContent = 'Demo connection lost';
-    });
-    $('neuron-light').className = '';
-    set('sources-count', 'Demo connection lost');
-    set('sample-freshness', 'Last known value · connection lost');
-  } finally { window.setTimeout(poll, 600); }
+  } catch {
+    pollConnected = false;
+    if (state) render(state);
+    else { $('connection').className = 'connection bad'; text($('connection-label'), 'Device data unavailable'); }
+  } finally { setTimeout(poll, 700); }
 }
 
-$('start').addEventListener('click', () => action('start', {loop: false}));
-$('loop').addEventListener('click', () => action('start', {loop: true}));
-$('reset').addEventListener('click', () => action('reset'));
-$('inject').addEventListener('click', () => action('fault', {action: 'inject'}));
-$('clear').addEventListener('click', () => action('fault', {action: 'clear'}));
-$('attach').addEventListener('click', attachDashboard);
-$('detach').addEventListener('click', detachDashboard);
-$('fullscreen').addEventListener('click', async () => {
-  try {
-    if (document.fullscreenElement) await document.exitFullscreen();
-    else await document.documentElement.requestFullscreen();
-  } catch { notice('This browser does not support full screen. Use its presentation or kiosk mode.'); }
-});
-window.addEventListener('pagehide', () => { if (client) client.end(true); });
-const architecture = document.querySelector('.architecture');
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-let motionPreference = null;
-try { motionPreference = localStorage.getItem('factory-demo-flow-motion'); } catch { /* Storage may be disabled. */ }
-function applyMotionPreference() {
-  const enabled = motionPreference === 'on' || (motionPreference !== 'off' && !reducedMotion.matches);
-  architecture.classList.toggle('motion-enabled', enabled);
-  $('flow-motion').setAttribute('aria-pressed', String(enabled));
-  set('flow-motion', enabled ? 'Pause packets' : 'Animate packets');
+for (const device of Object.keys(names)) {
+  const card = cardFor(device);
+  function explain(button) {
+    if (button.getAttribute('aria-disabled') !== 'true') return false;
+    showFeedback(device, button.dataset.reason || 'Waiting for device data.');
+    return true;
+  }
+  card.querySelector('[data-claim]').addEventListener('click', async event => {
+    if (explain(event.currentTarget)) return;
+    feedback.delete(device);
+    await post(`/api/devices/${device}/claim`, {}, device);
+  });
+  card.querySelector('[data-release]').addEventListener('click', event => {
+    if (!explain(event.currentTarget)) post(`/api/devices/${device}/release`, {lease_id: state?.visitor.devices[device].lease_id}, device);
+  });
+  card.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => {
+    if (explain(button)) return;
+    deviceCommand(device, button.dataset.action === 'stop' ? 'rpm' : button.dataset.action, button.dataset.action === 'stop' ? {value: 0} : {});
+  }));
+  card.querySelector('[data-settings]').addEventListener('submit', event => {
+    event.preventDefault();
+    if (card.dataset.writeReason || !state) { showFeedback(device, card.dataset.writeReason || 'Waiting for device data.'); return; }
+    const values = Object.fromEntries([...new FormData(event.currentTarget)].map(([key, value]) => [key, Number(value)]));
+    deviceCommand(device, device === 'hvac-1' ? 'hvac' : 'rpm', device === 'hvac-1' ? values : {value: values.rpm});
+  });
 }
-$('flow-motion').addEventListener('click', () => {
-  motionPreference = architecture.classList.contains('motion-enabled') ? 'off' : 'on';
-  try { localStorage.setItem('factory-demo-flow-motion', motionPreference); } catch { /* Keep the choice for this page. */ }
-  applyMotionPreference();
+$('order-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if ($('send-order').getAttribute('aria-disabled') === 'true') { showOrderFeedback($('send-order').dataset.reason || 'Waiting for device data.'); return; }
+  orderFeedback = null;
+  await post('/api/place-order', {plc_id: $('order-device').value, recipe_id: $('order-recipe').value, qty: 1});
 });
-reducedMotion.addEventListener('change', applyMotionPreference);
-applyMotionPreference();
-const flowLines = [...document.querySelectorAll('.flow-line')];
-const sizePackets = () => flowLines.forEach(line => {
-  line.style.setProperty('--packet-travel', Math.max(0, line.clientHeight - 8) + 'px');
+$('order-device').addEventListener('change', () => { orderFeedback = null; if (state) render(state); });
+for (const kind of ['commands', 'telemetry']) {
+  $('pause-' + kind).addEventListener('click', () => {
+    paused[kind] = !paused[kind];
+    text($('pause-' + kind), paused[kind] ? 'Resume' : 'Pause');
+    $('pause-' + kind).setAttribute('aria-pressed', String(paused[kind]));
+    if (kind === 'telemetry') telemetryLatest.clear();
+    paintTraffic();
+  });
+  $('clear-' + kind).addEventListener('click', () => {
+    $(kind === 'commands' ? 'command-log' : 'telemetry-log').replaceChildren();
+    if (kind === 'commands') { retainedRows.clear(); reservationStates.clear(); }
+  });
+}
+$('watch-here').addEventListener('click', () => {
+  mqttClient?.watchHere();
+  $('pause-commands').focus({preventScroll: true});
 });
-new ResizeObserver(sizePackets).observe(architecture);
-sizePackets();
-let mapVisible = true;
-const updateMotion = () => architecture.classList.toggle('motion-paused', document.hidden || !mapVisible);
-new IntersectionObserver(entries => {
-  mapVisible = entries[0].isIntersecting;
-  updateMotion();
-}).observe(architecture);
-document.addEventListener('visibilitychange', updateMotion);
-window.setInterval(updateDashboard, 1000);
+$('dismiss-notice').addEventListener('click', () => notice(''));
+showFilters('command-filters', commandFilters);
+showFilters('telemetry-filters', [telemetryFilter]);
 poll();
+connectTraffic();
+window.addEventListener('pagehide', () => mqttClient?.end(true));

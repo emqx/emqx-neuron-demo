@@ -64,7 +64,7 @@
     <h1><a href="/">← LIVE UNS</a></h1>
     <span class="right">
       <span id="dot" class="dot"></span>
-      <span id="status">connecting…</span>
+      <span id="status">connecting…</span><button id="watch-here" hidden>Watch here</button>
       <span style="margin-left:14px;"><span id="msg-count">0</span> msgs · <span id="topic-count">0</span> topics</span>
     </span>
   </header>
@@ -224,12 +224,14 @@
     }
 
     setStatus('connecting…', 'warn');
-    const client = mqtt.connect(wsUrl, {
-      clientId: 'uns-viewer-' + Math.random().toString(16).slice(2, 8),
-      clean: true,
-      reconnectPeriod: 2000,
-    });
+    async function connectViewer() {
+    const client = await demoMqttConnect(config, 'uns');
+    const watchHere = document.getElementById('watch-here');
+    watchHere.addEventListener('click', () => { watchHere.hidden = true; client.watchHere(); });
+    client.on('viewer-standby', () => { watchHere.hidden = false; setStatus('Watching in another tab', 'warn'); });
+    client.on('viewer-resuming', () => setStatus('connecting…', 'warn'));
     client.on('connect',   () => {
+      watchHere.hidden = true;
       setStatus('connected', 'on');
       client.subscribe([
         config.prefix + '/orders/#',
@@ -242,7 +244,7 @@
       ], {qos: 0});
     });
     client.on('reconnect', () => setStatus('reconnecting…', 'warn'));
-    client.on('close',     () => setStatus('disconnected', 'off'));
+    client.on('close',     () => { if (watchHere.hidden) setStatus('reconnecting…', 'warn'); });
     client.on('error',     e  => setStatus('error: ' + (e.message || e), 'off'));
     client.on('message',   (topic, payload) => {
       msgCount++;
@@ -251,6 +253,9 @@
       node.payload = payload.toString();
       node.ts = Date.now();
     });
+    window.addEventListener('pagehide', () => client.end(true));
+    }
+    connectViewer().catch(error => setStatus(error.message, 'warn'));
   </script>
 </body>
 </html>

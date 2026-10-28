@@ -40,6 +40,13 @@ class ShowcaseTests(unittest.TestCase):
         self.feed(retained=True)
         self.assertFalse(self.demo.snapshot()["ready"])
 
+    def test_polled_lifecycle_restores_state_after_broker_restart(self):
+        self.demo.observe("acme-mfg/plant-1/machining/line-1/plc-1/telemetry",
+                          {"values": {"spindle_rpm": 0, "power_kw": 0, "phase_state": "idle",
+                                      "current_batch_id": "", "current_phase": ""}})
+        self.assertEqual(self.demo.snapshot()["plcs"]["plc-1"]["state"], "idle")
+        self.assertFalse(self.demo.snapshot()["events"])
+
     def test_error_reads_keep_last_value_but_invalidate_freshness(self):
         self.feed()
         self.demo.observe("acme-mfg/plant-1/machining/line-1/plc-1/telemetry",
@@ -127,6 +134,9 @@ class ShowcaseTests(unittest.TestCase):
         self.demo.plcs["plc-1"] = {"state": "faulted", "batch_id": "B-1", "phase": "rough"}
 
         def acknowledge(topic, payload, **kwargs):
+            if topic.endswith("/orders/BOOTH-one"):
+                self.assertTrue(json.loads(payload)["cancel"])
+                return
             self.assertEqual(topic, "acme-mfg/plant-1/machining/line-1/plc-1/batch/B-1/phase/rough/command")
             self.assertEqual(json.loads(payload)["action"], "abort")
             self.demo.orders["BOOTH-one"]["state"] = "failed"
@@ -138,7 +148,7 @@ class ShowcaseTests(unittest.TestCase):
         self.assertIn("BOOTH-one", self.demo.orders)
         self.assertEqual(self.demo.snapshot()["scene"]["step"], "ready")
         self.assertEqual(self.demo.reset_version, 1)
-        self.assertEqual(self.publish.call_count, 1)
+        self.assertEqual(self.publish.call_count, 2)
 
     def test_reset_does_not_falsely_report_success_without_ack(self):
         self.demo.owned_order = "BOOTH-unresolved"
@@ -174,8 +184,12 @@ class AuthTests(unittest.TestCase):
         self.base = "https://factory.example.test"
 
     def login(self, **extra):
-        return self.client.post("/login", base_url=self.base,
-                                data={"password": "rehearsal-only-password", **extra})
+        response = self.client.post("/login", base_url=self.base,
+                                    data={"password": "rehearsal-only-password", **extra})
+        if response.status_code == 302:
+            with self.client.session_transaction(base_url=self.base) as session:
+                self.client.environ_base["HTTP_X_DEMO_CSRF"] = session["csrf"]
+        return response
 
     def test_unauthenticated_controls_are_blocked(self):
         response = self.client.post("/api/demo/start", base_url=self.base, json={})

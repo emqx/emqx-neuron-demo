@@ -19,10 +19,13 @@ x-plc: &plc
     - demo
 
 x-neuron: &neuron
-  image: emqx/neuronex:3.9.4
+  image: emqx/neuronex:4.0.0
   restart: unless-stopped
   environment:
     - LOG_CONSOLE=1
+    - NEURONEX__SERVER__ADMIN__PASSWORD=${NEURON_ADMIN_PASSWORD:?Run make security-init}
+    - NEURONEX__SERVER__VIEWER__USERNAME=viewer
+    - NEURONEX__SERVER__VIEWER__PASSWORD=demo-viewer
   depends_on:
     emqx:
       condition: service_healthy
@@ -31,18 +34,24 @@ x-neuron: &neuron
 
 services:
   emqx:
-    image: emqx/emqx:6.3.1
+    image: emqx/emqx:6.3.2
     container_name: emqx
+    hostname: emqx
     ports:
       - "127.0.0.1:1883:1883"
       - "127.0.0.1:8083:8083"
       - "127.0.0.1:18083:18083"
     environment:
+      # Stable single-node identity keeps broker state across container IP changes.
+      EMQX_NODE_NAME: emqx@127.0.0.1
       EMQX_DASHBOARD__DEFAULT_USERNAME: admin
-      EMQX_DASHBOARD__DEFAULT_PASSWORD: admin
-      EMQX_AUTHORIZATION__NO_MATCH: allow
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_ADMIN_PASSWORD:?Run make security-init}
     volumes:
       - ./emqx/base.hocon:/opt/emqx/etc/base.hocon:ro
+      - ./.runtime/mqtt-users.csv:/opt/emqx/etc/demo-users.csv:ro
+      - ./.runtime/acl.conf:/opt/emqx/etc/demo-acl.conf:ro
+      - ./.runtime/ws-auth.hocon:/opt/emqx/etc/demo-ws-auth.hocon:ro
+      - emqx-data:/opt/emqx/data
     healthcheck:
       test: ["CMD", "emqx", "ctl", "status"]
       interval: 10s
@@ -73,9 +82,12 @@ services:
       - "127.0.0.1:3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Run make security-init}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:?Run make security-init}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_VIEWERS_CAN_EDIT: "false"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
@@ -98,6 +110,12 @@ services:
       MQTT_HOST: emqx
       MQTT_PORT: "1883"
       PORT: "8090"
+      MQTT_USERNAME: mes
+      MQTT_PASSWORD: ${MQTT_MES_PASSWORD:?Run make security-init}
+      DEMO_ADMIN_KEY: ${DEMO_ADMIN_KEY:?Run make security-init}
+      MES_DB: /data/mes.sqlite
+    volumes:
+      - mes-data:/data
     ports:
       - "127.0.0.1:8090:8090"
     restart: unless-stopped
@@ -120,8 +138,21 @@ services:
       MQTT_HOST: emqx
       MQTT_PORT: "1883"
       PORT: "8080"
+      MQTT_USERNAME: operator
+      MQTT_PASSWORD: ${MQTT_OPERATOR_PASSWORD:?Run make security-init}
+      MQTT_JWT_PRIVATE_KEY_FILE: /run/secrets/mqtt-signing-key.pem
+      DEMO_ADMIN_KEY: ${DEMO_ADMIN_KEY:?Run make security-init}
+      DEMO_SESSION_SECRET: ${DEMO_SESSION_SECRET:?Run make security-init}
+      DEMO_COOKIE_SECURE: "0"
+      VISITOR_DB: /data/visitors.sqlite
+      CLAIM_SECONDS: ${CLAIM_SECONDS:-30}
+      BATCH_SECONDS: ${BATCH_SECONDS:-90}
+      DEVICE_QUEUE_SIZE: ${DEVICE_QUEUE_SIZE:-3}
       SHOWCASE_TITLE: ${SHOWCASE_TITLE:-From shop floor to cloud.}
       SHOWCASE_EVENT: ${SHOWCASE_EVENT:-Live manufacturing demonstration}
+    volumes:
+      - visitor-data:/data
+      - ./.runtime/mqtt-signing-key.pem:/run/secrets/mqtt-signing-key.pem:ro
     ports:
       - "127.0.0.1:8080:8080"
     restart: unless-stopped
@@ -176,21 +207,21 @@ services:
     hostname: neuron-1
     ports: ["127.0.0.1:8085:8085"]
     volumes:
-      - neuron-1-data:/opt/neuronex/data
+      - neuron-1-v4-data:/opt/neuronex/data
   neuron-2:
     <<: *neuron
     container_name: neuron-2
     hostname: neuron-2
     ports: ["127.0.0.1:8086:8085"]
     volumes:
-      - neuron-2-data:/opt/neuronex/data
+      - neuron-2-v4-data:/opt/neuronex/data
   neuron-3:
     <<: *neuron
     container_name: neuron-3
     hostname: neuron-3
     ports: ["127.0.0.1:8087:8085"]
     volumes:
-      - neuron-3-data:/opt/neuronex/data
+      - neuron-3-v4-data:/opt/neuronex/data
 
 networks:
   demo:
@@ -202,8 +233,12 @@ networks:
         - subnet: 172.30.0.0/24
 
 volumes:
+  emqx-data:
   timescale-data:
   grafana-data:
-  neuron-1-data:
-  neuron-2-data:
-  neuron-3-data:
+  # Keep legacy neuron-*-data volumes intact: 4.0.0 has no automatic 3.x migration.
+  neuron-1-v4-data:
+  neuron-2-v4-data:
+  neuron-3-v4-data:
+  mes-data:
+  visitor-data:

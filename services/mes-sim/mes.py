@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["paho-mqtt==2.1.0", "flask==3.1.3"]
+# dependencies = ["paho-mqtt==2.1.0", "flask==3.1.3", "waitress==3.0.2"]
 # ///
 """MES simulator.
 
@@ -11,7 +11,8 @@ For each order on <ent>/<site>/orders/<order_id>:
   4. Build batch record, publish to <ent>/<site>/batches/<batch_id>/record.
   5. Update order status.
 
-v1: HOLD / RESUME / ABORT and fault paths are stubs — happy path only.
+PLC events drive hold/resume/fault visibility. Cancellation and restart
+recovery abort owned batches through the same MQTT command path.
 """
 from __future__ import annotations
 
@@ -21,10 +22,15 @@ import queue
 import re
 import threading
 import time
+import math
+import secrets
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
+from waitress import serve
+from journal import Journal
 import paho.mqtt.client as mqtt
 
 
@@ -90,11 +96,16 @@ class Batch:
 lock = threading.Lock()
 batches: dict[str, Batch] = {}                        # batch_id -> Batch
 orders_in_flight: set[str] = set()                    # order_ids actively running or queued
-order_queue: "queue.Queue[dict]" = queue.Queue()      # raw order payloads
+order_queue: "queue.Queue[dict]" = queue.Queue(maxsize=3)
 phase_events: dict[tuple[str, str], threading.Event] = {}  # (batch_id, phase) -> Event
 phase_results: dict[tuple[str, str], str] = {}        # (batch_id, phase) -> last state seen
 batch_counter = 0
 part_counter = 0
+journal = Journal(os.getenv("MES_DB", ":memory:"))
+interrupted_orders = journal.interrupted()
+plc_states = {}
+reservations = {}  # Retained operator reservations; cleared only after device recovery.
+cancelled_orders = set()
 
 
 def next_batch_id() -> str:
@@ -109,16 +120,30 @@ def next_part_serial() -> str:
     return f"PART-{int(time.time()):010d}-{part_counter:04d}"
 
 
-def allocate_plc() -> dict | None:
+def allocate_plc(order=None) -> dict | None:
     """Return the first PLC not currently running a batch."""
     busy = {b.plc_id for b in batches.values() if b.state == "running"}
+    order = order or {}
     for plc in PLCS:
-        if plc["id"] not in busy:
+        reservation = reservations.get(plc["id"])
+        if order.get("plc_id") and order["plc_id"] != plc["id"]:
+            continue
+        if order.get("claim_id"):
+            if (not reservation or reservation.get("id") != order["claim_id"]
+                    or reservation.get("kind") != "batch" or reservation.get("order_id") != order.get("order_id")):
+                continue
+        elif reservation:
+            continue
+        state = plc_states.get(plc["id"], {})
+        if (plc["id"] not in busy and time.monotonic() - state.get("received", 0) < 6
+                and state.get("state") in ("idle", "completed", "aborted")):
             return plc
     return None
 
 
 def publish_order_status(client: mqtt.Client, order_id: str, **payload) -> None:
+    if payload.get("state") in ("running", "completed", "failed"):
+        journal.set(order_id, payload["state"])
     topic = f"{ENTERPRISE}/{SITE}/orders/{order_id}/status"
     body = {"order_id": order_id, "ts": utc_now(), **payload}
     client.publish(topic, json.dumps(body), qos=1, retain=True)
@@ -153,7 +178,14 @@ def on_connect(client, _u, _f, reason_code, _p):
     if reason_code == 0:
         client.subscribe(ORDERS_PATTERN, qos=1)
         client.subscribe(
-            f"{ENTERPRISE}/{SITE}/{AREA}/+/+/state-events", qos=1)
+            f"{ENTERPRISE}/{SITE}/{AREA}/{LINE}/+/state-events", qos=1)
+        client.subscribe(f"{ENTERPRISE}/{SITE}/{AREA}/{LINE}/+/state", qos=1)
+        client.subscribe(f"{ENTERPRISE}/{SITE}/{AREA}/{LINE}/+/telemetry", qos=1)
+        client.subscribe(f"{ENTERPRISE}/{SITE}/{AREA}/{LINE}/+/control/reservation", qos=1)
+        for order_id in interrupted_orders:
+            publish_order_status(client, order_id, state="failed", reason="Demo restarted; please queue a new turn.")
+            clear_retained_order(client, order_id)
+        interrupted_orders.clear()
         print(f"[{utc_now()}] MQTT connected; subs: orders + PLC state-events",
               flush=True)
     else:
@@ -161,22 +193,91 @@ def on_connect(client, _u, _f, reason_code, _p):
 
 
 def on_message(_c, _u, msg):
+    if msg.topic.endswith("/control/reservation"):
+        try:
+            body = json.loads(msg.payload)
+        except (ValueError, UnicodeDecodeError):
+            return
+        plc_id = msg.topic.split("/")[-3]
+        if plc_id not in ("plc-1", "plc-2") or not isinstance(body, dict) or not isinstance(body.get("id"), str):
+            return
+        with lock:
+            current = reservations.get(plc_id)
+            if body.get("release") is True:
+                if current and current["id"] == body["id"]:
+                    del reservations[plc_id]
+                return
+            running = next((b for b in batches.values() if b.plc_id == plc_id and b.state == "running"), None)
+            accepted = ((not current or current["id"] == body["id"])
+                        and (not running or running.order_id == body.get("order_id")))
+            if accepted:
+                reservations[plc_id] = body
+        _c.publish(msg.topic + "/ack", json.dumps({"id": body["id"], "accepted": accepted}), qos=1)
+        return
+    if msg.topic.endswith("/telemetry"):
+        try:
+            body = json.loads(msg.payload)
+        except (ValueError, UnicodeDecodeError):
+            return
+        values = body.get("values", {}) if isinstance(body, dict) else {}
+        plc_id = msg.topic.split("/")[-2]
+        if (not msg.retain and plc_id in ("plc-1", "plc-2") and isinstance(values, dict)
+                and all(isinstance(values.get(key), str) for key in ("phase_state", "current_batch_id", "current_phase"))):
+            with lock:
+                plc_states[plc_id] = {"state": values["phase_state"], "batch_id": values["current_batch_id"],
+                                      "phase": values["current_phase"], "received": time.monotonic()}
+        return
+    if msg.topic.endswith("/state"):
+        try:
+            state = json.loads(msg.payload)
+        except (ValueError, UnicodeDecodeError):
+            return
+        plc_id = msg.topic.split("/")[-2]
+        if isinstance(state, dict) and plc_id in ("plc-1", "plc-2") and not msg.retain:
+            with lock:
+                plc_states[plc_id] = {**state, "received": time.monotonic()}
+        return
     # Order intake.
     m = ORDER_TOPIC_RE.match(msg.topic)
     if m and "/status" not in msg.topic:
         order_id = m.group(1)
         try:
             order = json.loads(msg.payload.decode("utf-8")) if msg.payload else {}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             return
-        if not order:
+        if not order or not isinstance(order, dict):
             return  # tombstone / retained-clear
-        order["order_id"] = order.get("order_id", order_id)
+        if order.get("order_id") != order_id or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", order_id):
+            return
+        if order.get("cancel") is True:
+            with lock:
+                running = next((b for b in batches.values() if b.order_id == order_id and b.state == "running"), None)
+                if running:
+                    cancelled_orders.add(order_id)
+                elif journal.state(order_id) not in ("completed", "failed"):
+                    publish_order_status(_c, order_id, state="failed", reason="Turn ended before dispatch.")
+            return
+        if journal.state(order_id):
+            return
+        expiry = order.get("expires_at")
+        valid = (not msg.retain and order.get("recipe_id") in RECIPES and type(order.get("qty")) is int
+                 and order["qty"] == 1 and type(expiry) in (int, float) and math.isfinite(expiry)
+                 and time.time() < expiry <= time.time() + 300
+                 and (not order.get("plc_id") or (order["plc_id"] in ("plc-1", "plc-2") and isinstance(order.get("claim_id"), str))))
+        if not valid:
+            publish_order_status(_c, order_id, state="failed", reason="Invalid, expired or retained order.")
+            clear_retained_order(_c, order_id)
+            return
         with lock:
-            if order_id in orders_in_flight:
+            if not journal.claim(order_id):
                 return
             orders_in_flight.add(order_id)
-        order_queue.put(order)
+            try:
+                order_queue.put_nowait(order)
+            except queue.Full:
+                orders_in_flight.discard(order_id)
+                publish_order_status(_c, order_id, state="failed", reason="MES queue is full.")
+                return
         print(f"[{utc_now()}] order received: {order_id} {order.get('recipe_id')}",
               flush=True)
         return
@@ -206,8 +307,9 @@ def on_message(_c, _u, msg):
         if not (batch_id and phase and state):
             return
         with lock:
-            phase_results[(batch_id, phase)] = state
             evt = phase_events.get((batch_id, phase))
+            if evt:
+                phase_results[(batch_id, phase)] = state
             b = batches.get(batch_id)
             if b:
                 b.events.append(PhaseEvent(phase=phase, state=state, ts=utc_now()))
@@ -238,10 +340,15 @@ def run_batch(client: mqtt.Client, order: dict) -> None:
     # see the same PLC as idle).
     while True:
         with lock:
-            plc = allocate_plc()
+            if journal.state(order_id) == "failed":
+                return
+            if time.time() >= order["expires_at"]:
+                publish_order_status(client, order_id, state="failed", reason="Order expired waiting for an available machine.")
+                return
+            plc = allocate_plc(order)
             if plc is not None:
                 batch_counter += 1
-                batch_id = f"B-{batch_counter:04d}"
+                batch_id = "B-" + uuid.uuid4().hex
                 part_counter += 1
                 part_serial = f"PART-{int(time.time()):010d}-{part_counter:04d}"
                 batch = Batch(
@@ -265,6 +372,14 @@ def run_batch(client: mqtt.Client, order: dict) -> None:
           f"recipe={recipe_id} plc={plc['id']} part={part_serial}", flush=True)
 
     for phase in RECIPES[recipe_id]:
+        with lock:
+            if order_id in cancelled_orders:
+                batch.state = "failed"
+                batch.completed_at = utc_now()
+                batch.fail_reason = "Turn ended."
+                publish_batch_record(client, batch)
+                publish_order_status(client, order_id, state="failed", reason=batch.fail_reason)
+                return
         evt = threading.Event()
         with lock:
             phase_events[(batch_id, phase)] = evt
@@ -272,6 +387,7 @@ def run_batch(client: mqtt.Client, order: dict) -> None:
         publish_batch_record(client, batch)
         publish_phase_command(client, batch, phase, "start")
         if not evt.wait(timeout=PHASE_TIMEOUT_S):
+            publish_phase_command(client, batch, phase, "abort")
             with lock:
                 batch.state = "failed"
                 batch.fail_reason = f"phase {phase} timed out"
@@ -315,13 +431,13 @@ def run_batch(client: mqtt.Client, order: dict) -> None:
 
 
 def dispatcher(client: mqtt.Client) -> None:
-    """One thread per order — multiple batches run concurrently across PLCs."""
+    """Two fixed workers; queued orders never create additional threads."""
     while True:
         order = order_queue.get()
-        threading.Thread(
-            target=_safe_run, args=(client, order), daemon=True,
-            name=f"batch-{order.get('order_id', '?')}",
-        ).start()
+        try:
+            _safe_run(client, order)
+        finally:
+            order_queue.task_done()
 
 
 def _safe_run(client: mqtt.Client, order: dict) -> None:
@@ -329,10 +445,58 @@ def _safe_run(client: mqtt.Client, order: dict) -> None:
         run_batch(client, order)
     except Exception as e:
         print(f"[{utc_now()}] batch failed: {e}", flush=True)
+        publish_order_status(client, order["order_id"], state="failed", reason="MES could not execute the order.")
+    finally:
+        with lock:
+            orders_in_flight.discard(order["order_id"])
+            cancelled_orders.discard(order["order_id"])
+            for b in list(batches.values()):
+                if b.order_id == order["order_id"]:
+                    if b.state == "running":
+                        b.state, b.completed_at = "failed", utc_now()
+                        publish_batch_record(client, b)
+                    for key in [k for k in phase_events if k[0] == b.batch_id]:
+                        phase_events.pop(key, None)
+                        phase_results.pop(key, None)
+            terminal = [b for b in batches.values() if b.state != "running"]
+            for b in terminal[:-100]:
+                batches.pop(b.batch_id, None)
+                client.publish(f"{ENTERPRISE}/{SITE}/orders/{b.order_id}/status", b"", retain=True)
+                client.publish(f"{ENTERPRISE}/{SITE}/batches/{b.batch_id}/record", b"", retain=True)
+
+
+def recover_machines(client):
+    """Abort orphaned runs after restart and retry cancellation across phase races."""
+    ticks = 0
+    while True:
+        time.sleep(1)
+        with lock:
+            running = {b.batch_id: b for b in batches.values() if b.state == "running"}
+            for plc_id, state in plc_states.items():
+                bid, phase = state.get("batch_id"), state.get("phase")
+                if not bid or not phase or state.get("state") not in ("running", "holding", "faulted"):
+                    continue
+                batch = running.get(bid)
+                if batch and batch.order_id not in cancelled_orders:
+                    continue
+                topic = f"{ENTERPRISE}/{SITE}/{AREA}/{LINE}/{plc_id}/batch/{bid}/phase/{phase}/command"
+                client.publish(topic, json.dumps({"action": "abort", "batch_id": bid, "phase": phase}), qos=1)
+        ticks += 1
+        if ticks % 3600 == 0:
+            journal.prune()
 
 
 # ── HTTP API ────────────────────────────────────────────────────────────────
 app = Flask(__name__)
+
+
+@app.before_request
+def protect_writes():
+    if request.method != "GET":
+        expected = os.getenv("DEMO_ADMIN_KEY", "")
+        supplied = request.headers.get("X-Demo-Admin", "")
+        if not expected or not secrets.compare_digest(expected, supplied):
+            return jsonify(error="Use your active turn in the operator console to control a batch."), 403
 
 
 @app.get("/healthz")
@@ -493,7 +657,7 @@ function actionBtn(label, batchId, action, disabled, danger) {
   const btn = el('button', {className: 'action' + (danger ? ' danger' : '')},
                  [label]);
   if (disabled) btn.setAttribute('disabled', '');
-  else btn.addEventListener('click', () => batchAction(batchId, action));
+  else btn.disabled = true;
   return btn;
 }
 
@@ -581,13 +745,17 @@ def main() -> None:
     )
     client.on_connect = on_connect
     client.on_message = on_message
+    if os.getenv("MQTT_USERNAME"):
+        client.username_pw_set(os.environ["MQTT_USERNAME"], os.environ["MQTT_PASSWORD"])
     client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
     client.loop_start()
     _mqtt = client
 
-    threading.Thread(target=dispatcher, args=(client,), daemon=True).start()
+    for _ in PLCS:
+        threading.Thread(target=dispatcher, args=(client,), daemon=True).start()
+    threading.Thread(target=recover_machines, args=(client,), daemon=True).start()
     print(f"[{utc_now()}] MES sim listening on :{PORT}", flush=True)
-    app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False)
+    serve(app, host="0.0.0.0", port=PORT, threads=4)
 
 
 if __name__ == "__main__":

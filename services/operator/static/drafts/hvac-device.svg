@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120" role="img" aria-label="HVAC unit">
+      <ellipse cx="123" cy="108" rx="93" ry="8" fill="#f5f5f5"/>
+      <path d="m38 48 29-22h133l-29 22Z" fill="#f5f5f5" stroke="#a3a3a3"/>
+      <path d="m171 48 29-22v61l-29 21Z" fill="#d4d4d4" stroke="#a3a3a3"/>
+      <rect x="38" y="48" width="133" height="60" rx="2" fill="#fafafa" stroke="#a3a3a3"/>
+      <path d="M38 51h133v7H38" fill="#189bfe"/>
+      <ellipse cx="96" cy="37" rx="21" ry="6" fill="#d4d4d4" stroke="#a3a3a3"/>
+      <ellipse cx="153" cy="37" rx="21" ry="6" fill="#d4d4d4" stroke="#a3a3a3"/>
+      <path d="M80 37h32m-16-4v8m41-4h32m-16-4v8" stroke="#a3a3a3"/>
+      <circle cx="76" cy="82" r="19" fill="#e5e5e5" stroke="#a3a3a3"/>
+      <g fill="#a3a3a3"><path d="M76 79c-13-10-16 2-5 5l5-2Zm3 3c10-13-2-16-5-5l2 5Zm-3 3c13 10 16-2 5-5l-5 2Zm-3-3c-10 13 2 16 5 5l-2-5Z"/></g>
+      <circle cx="76" cy="82" r="4" fill="#737373"/>
+      <path d="M110 66h46m-46 6h46m-46 6h46m-46 6h46m-46 6h46m-46 6h46" stroke="#a3a3a3" stroke-width="2"/>
+      <path d="m180 58 12-9m-12 16 12-9m-12 16 12-9m-12 16 12-9m-12 16 12-9" stroke="#a3a3a3" stroke-width="2"/>
+      <path d="M48 110v3h17v-3m83 0v3h14v-3" stroke="#737373" stroke-width="3"/>
+
+</svg>

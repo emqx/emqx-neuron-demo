@@ -1,14 +1,14 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["flask==3.1.3", "paho-mqtt==2.1.0", "waitress==3.0.2"]
+# dependencies = ["flask==3.1.3", "paho-mqtt==2.1.0", "waitress==3.0.2", "PyJWT[crypto]==2.10.1"]
 # ///
 """Operator console.
 
 Routes:
-    /          — live shop-floor-to-cloud overview + guided walkthrough
-    /showcase  — guided booth walkthrough + separate MQTT dashboard
+    /          — live factory map, device claims, ERP orders and MQTT traffic
+    /showcase  — alias for the interactive demo
     /tools     — product links and architecture
-    /console   — ERP panel + PLCs table + recent orders + fault injection
+    /console   — compatibility redirect to the interactive demo
     /uns       — live MQTT-topic tree (connects to EMQX WS directly)
     /api/*     — operator and showcase controls
     /login     — optional hosted session login
@@ -24,14 +24,20 @@ import re
 import threading
 import time
 import uuid
+import hmac
+import secrets
+from pathlib import Path
+import jwt
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict, deque
 from urllib.parse import urlsplit, urlencode
 
-from flask import Flask, jsonify, render_template, request, redirect, session
+from flask import Flask, jsonify, render_template, request, redirect, session, g
 from werkzeug.security import check_password_hash
 from waitress import serve
 from showcase import Showcase
+from visitors import Limiter, Refused
+from control import DeviceControl
 import paho.mqtt.client as mqtt
 
 
@@ -86,6 +92,7 @@ def on_message(_c, _u, msg):
     if not isinstance(body, dict):
         return
     showcase.observe(msg.topic, body, retained=msg.retain)
+    controls.observe(msg.topic, body, retained=msg.retain)
 
     m = ORDER_STATUS_RE.match(msg.topic)
     if m:
@@ -125,6 +132,8 @@ client.on_connect = on_connect
 client.on_message = on_message
 client.on_disconnect = lambda *_: showcase.connection(False)
 client.reconnect_delay_set(min_delay=1, max_delay=5)
+if os.getenv("MQTT_USERNAME"):
+    client.username_pw_set(os.environ["MQTT_USERNAME"], os.environ["MQTT_PASSWORD"])
 
 
 def publish(topic, payload, qos=1, retain=False):
@@ -137,6 +146,12 @@ def publish(topic, payload, qos=1, retain=False):
 
 
 showcase = Showcase(publish, ENTERPRISE, SITE, AREA, LINE)
+controls = DeviceControl(showcase, os.getenv("VISITOR_DB", ":memory:"),
+                         seconds=int(os.getenv("CLAIM_SECONDS", "30")),
+                         batch_seconds=int(os.getenv("BATCH_SECONDS", "90")),
+                         capacity=int(os.getenv("DEVICE_QUEUE_SIZE", "3")))
+http_limits = Limiter()
+JWT_PRIVATE_KEY = Path(os.environ["MQTT_JWT_PRIVATE_KEY_FILE"]).read_text() if os.getenv("MQTT_JWT_PRIVATE_KEY_FILE") else None
 client.connect_async(MQTT_HOST, MQTT_PORT, keepalive=30)
 client.loop_start()
 
@@ -147,10 +162,10 @@ PUBLIC_BASE = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 if PASSWORD_HASH and (not os.getenv("DEMO_SESSION_SECRET") or not PUBLIC_BASE):
     raise RuntimeError("Hosted authentication needs DEMO_SESSION_SECRET and PUBLIC_BASE_URL.")
 app.config.update(
-    SECRET_KEY=os.getenv("DEMO_SESSION_SECRET"),
+    SECRET_KEY=os.getenv("DEMO_SESSION_SECRET") or secrets.token_hex(32),
     SESSION_COOKIE_NAME="factory_demo_session",
     SESSION_COOKIE_DOMAIN=os.getenv("DEMO_COOKIE_DOMAIN") or None,
-    SESSION_COOKIE_SECURE=os.getenv("DEMO_COOKIE_SECURE", "1") == "1",
+    SESSION_COOKIE_SECURE=os.getenv("DEMO_COOKIE_SECURE", "1" if PUBLIC_BASE.startswith("https:") else "0") == "1",
     SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
     PERMANENT_SESSION_LIFETIME=timedelta(hours=16), MAX_CONTENT_LENGTH=16384,
 )
@@ -190,7 +205,14 @@ def login_redirect(target):
 
 @app.before_request
 def protect():
-    if PASSWORD_HASH and request.endpoint not in ("login", "auth_check", "healthz") and not session.get("authenticated"):
+    supplied = request.headers.get("X-Demo-Admin", "")
+    admin_key = os.getenv("DEMO_ADMIN_KEY", "")
+    g.admin = bool(admin_key and supplied and hmac.compare_digest(supplied, admin_key))
+    if not session.get("visitor"):
+        session["visitor"] = secrets.token_urlsafe(24)
+        session["csrf"] = secrets.token_urlsafe(24)
+        session.permanent = True
+    if PASSWORD_HASH and not g.admin and request.endpoint not in ("login", "auth_check", "healthz") and not session.get("authenticated"):
         if request.path.startswith("/api/"):
             return jsonify(error="Sign in to use the demo.", login_url=PUBLIC_BASE + "/login"), 401
         return login_redirect(request.url)
@@ -200,6 +222,79 @@ def protect():
             return jsonify(error="Cross-origin actions are not allowed."), 403
         if request.path.startswith("/api/") and not request.is_json:
             return jsonify(error="Send a JSON request."), 415
+        if request.path.startswith("/api/") and not g.admin:
+            token = request.headers.get("X-Demo-CSRF", "")
+            if not token or not hmac.compare_digest(token, session["csrf"]):
+                return jsonify(error="Reload the page before using the controls."), 403
+            http_limits.take(("write", request.remote_addr), 120, 60)
+    if request.path.startswith("/api/"):
+        http_limits.take(("read", request.remote_addr), 1200, 60)
+
+
+@app.errorhandler(Refused)
+def refused(error):
+    response = jsonify(error=str(error))
+    response.status_code = error.status
+    if error.status == 429:
+        response.headers["Retry-After"] = str(error.retry_after)
+    return response
+
+
+def visitor_state():
+    return {**controls.snapshot(session["visitor"]), "csrf": session["csrf"]}
+
+
+@app.post("/api/devices/<device>/claim")
+def claim_device(device):
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(error="Send a JSON object."), 400
+    ticket = controls.join(session["visitor"], request.remote_addr, body.get("request_id"), device)
+    return jsonify(status="queued", ticket_id=ticket), 202
+
+
+@app.post("/api/devices/<device>/release")
+def release_device(device):
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(error="Send a JSON object."), 400
+    controls.release(session["visitor"], device, body.get("lease_id"))
+    return jsonify(status="releasing"), 202
+
+
+@app.post("/api/devices/<device>/command")
+def device_command(device):
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(error="Send a JSON object."), 400
+    try:
+        rid = controls.command(session["visitor"], device, body)
+    except RuntimeError as exc:
+        return jsonify(error=str(exc)), 503
+    result = {"status": "sent", "request_id": rid}
+    if body.get("action") == "status":
+        result["snapshot"] = controls.status_snapshot(device, rid)
+    return jsonify(result), 202
+
+
+@app.get("/api/mqtt-credentials")
+def mqtt_credentials():
+    http_limits.take(("mqtt", request.remote_addr), 60, 60)
+    if not JWT_PRIVATE_KEY:
+        return jsonify(error="MQTT viewer authentication is not configured."), 503
+    slot = request.args.get("slot", "showcase")
+    if slot not in ("showcase", "uns", "test"):
+        return jsonify(error="Unknown subscriber."), 400
+    client_id = "visitor-" + session["visitor"] + "-" + slot
+    # A fixed client ID per visitor/view bounds connections and prevents the
+    # token being used to impersonate an internal service or another visitor.
+    suffixes = ("orders/#", "batches/#", "+/+/+/telemetry", "+/+/+/telemetry/+", "+/+/+/state",
+                "+/+/+/state-events", "+/+/+/cmd/+", "+/+/+/control/#", "+/+/+/_demo/fault", "+/+/+/batch/+/phase/+/command")
+    payload = {"username": "visitor", "clientid": client_id, "iat": int(time.time()), "exp": int(time.time()) + 300,
+               "acl": [{"permission": "allow", "action": "subscribe", "topic": f"{ENTERPRISE}/{SITE}/{suffix}"}
+                       for suffix in suffixes] + [{"permission": "deny", "action": "all", "topic": "#"}]}
+    token = jwt.encode(payload, JWT_PRIVATE_KEY, algorithm="RS256")
+    return jsonify(clientId=client_id, username="visitor", password=token, expires=payload["exp"])
 
 
 @app.after_request
@@ -221,6 +316,10 @@ def login():
         key = request.remote_addr
         now = time.monotonic()
         with login_lock:
+            for old in [key for key, attempts in login_attempts.items() if not attempts or now - attempts[-1] > 60]:
+                login_attempts.pop(old, None)
+            if key not in login_attempts and len(login_attempts) >= 5000:
+                return render_template("login.html", target=target, error="Please try again in a minute."), 429
             recent = login_attempts[key]
             while recent and now - recent[0] > 60:
                 recent.popleft()
@@ -232,6 +331,8 @@ def login():
         elif check_password_hash(PASSWORD_HASH, request.form.get("password", "")):
             session.clear()
             session["authenticated"] = True
+            session["visitor"] = secrets.token_urlsafe(24)
+            session["csrf"] = secrets.token_urlsafe(24)
             session.permanent = True
             with login_lock:
                 login_attempts.pop(key, None)
@@ -273,7 +374,9 @@ def showcase_page():
 
 @app.get("/api/showcase")
 def showcase_state():
-    return jsonify(showcase.snapshot())
+    with showcase.lock:
+        recent_orders = sorted(showcase.orders.values(), key=lambda order: order.get("ts", ""))[-12:]
+    return jsonify(**showcase.snapshot(), orders=recent_orders, visitor=visitor_state())
 
 
 @app.get("/readyz")
@@ -287,6 +390,10 @@ def demo_start():
     body = request.get_json(silent=True)
     if not isinstance(body, dict) or not isinstance(body.get("loop", False), bool):
         return jsonify(error="loop must be true or false."), 400
+    if not g.admin:
+        return jsonify(error="Use device claims or the ERP order button."), 403
+    if controls.active or any(controls.waiting.values()):
+        return jsonify(error="Wait for device claims to finish before starting an operator loop."), 409
     try:
         showcase.start(loop=body.get("loop", False))
     except ValueError as exc:
@@ -296,7 +403,14 @@ def demo_start():
 
 @app.post("/api/demo/reset")
 def demo_reset():
-    showcase.reset()
+    if g.admin:
+        with controls.lock:
+            for ticket in controls.active.values():
+                ticket.update(stage="recovering", pending=None)
+            controls.save()
+        showcase.reset()
+    else:
+        return jsonify(error="Release your device using its claim controls."), 403
     return jsonify(status="resetting"), 202
 
 
@@ -306,7 +420,10 @@ def demo_fault():
     if not isinstance(body, dict):
         return jsonify(error="Send an action."), 400
     try:
-        showcase.fault(body.get("action"))
+        if g.admin:
+            showcase.fault(body.get("action"))
+        else:
+            return jsonify(error="Use the controls on your reserved device."), 403
     except ValueError as exc:
         return jsonify(error=str(exc)), 409
     except RuntimeError as exc:
@@ -327,7 +444,7 @@ def api_state():
             key=lambda o: o.get("ts", ""),
             reverse=True,
         )
-        plc_list = sorted(plcs.values(), key=lambda c: c.get("plc_id", ""))
+    plc_list = sorted(showcase.snapshot()["plcs"].values(), key=lambda c: c.get("plc_id", ""))
     return jsonify({
         "enterprise": ENTERPRISE,
         "site": SITE,
@@ -335,6 +452,7 @@ def api_state():
         "recipes": RECIPES,
         "orders": ords,
         "plcs": plc_list,
+        "visitor": visitor_state(),
     })
 
 
@@ -351,6 +469,8 @@ def api_fault():
         return jsonify({"error": "action must be 'inject' or 'clear'"}), 400
     if plc_id not in ("plc-1", "plc-2"):
         return jsonify({"error": "unknown plc_id"}), 400
+    if not g.admin:
+        return jsonify(error="Use the controls on your reserved device."), 403
     topic = f"{ENTERPRISE}/{SITE}/{AREA}/{LINE}/{plc_id}/_demo/fault"
     payload = {"action": action, "type": ftype, "ts": utc_now()}
     try:
@@ -362,8 +482,6 @@ def api_fault():
 
 @app.post("/api/place-order")
 def api_place_order():
-    if showcase.snapshot()["scene"]["active"]:
-        return jsonify(error="Reset the guided walkthrough before placing a manual order."), 409
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         return jsonify(error="Send a JSON object."), 400
@@ -373,27 +491,21 @@ def api_place_order():
         return jsonify(error="qty must be an integer."), 400
     if recipe not in RECIPES:
         return jsonify({"error": "unknown recipe"}), 400
-    if qty < 1 or qty > 100:
-        return jsonify({"error": "qty out of range"}), 400
+    if qty != 1:
+        return jsonify({"error": "Each demo order makes one part."}), 400
 
-    order_id = f"ORD-{int(time.time())}-{uuid.uuid4().hex[:4]}"
-    payload = {
-        "order_id":  order_id,
-        "recipe_id": recipe,
-        "qty":       qty,
-        "placed_at": utc_now(),
-    }
-    topic = f"{ENTERPRISE}/{SITE}/orders/{order_id}"
-    try:
-        publish(topic, json.dumps(payload), retain=True)
-    except RuntimeError as exc:
-        return jsonify(error=str(exc)), 503
-    return jsonify({"status": "ok", "order_id": order_id, "topic": topic})
+    ticket = controls.join(session["visitor"], request.remote_addr, body.get("request_id"), body.get("plc_id"), recipe)
+    return jsonify(status="queued", ticket_id=ticket), 202
+
+
+@app.post("/api/command")
+def api_command():
+    return jsonify(error="Use the controls on your reserved device."), 403
 
 
 @app.get("/console")
 def console():
-    return render_template("console.html")
+    return redirect("/showcase")
 
 
 @app.get("/uns")
@@ -412,6 +524,7 @@ def tools_page():
 
 
 def main() -> None:
+    controls.start()
     print(f"[{utc_now()}] Operator console listening on :{PORT}", flush=True)
     # Only the hosted profile trusts proxy headers. Its app port is private
     # (Docker network + loopback); Caddy is the only public entry point.

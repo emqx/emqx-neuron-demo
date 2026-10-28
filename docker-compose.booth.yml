@@ -1,0 +1,35 @@
+# Optional hosted entry point. Local restrictions are enabled in the base file.
+services:
+  caddy:
+    image: caddy:2.10.2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DEMO_DOMAIN: ${DEMO_DOMAIN:?Set DEMO_DOMAIN in .env.booth}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - demo
+    depends_on:
+      - operator
+  operator:
+    environment:
+      DEMO_PASSWORD_HASH: ${DEMO_PASSWORD_HASH:?Run tools/booth_credentials.py}
+      DEMO_COOKIE_SECURE: "1"
+      DEMO_COOKIE_DOMAIN: ${DEMO_DOMAIN}
+      PUBLIC_BASE_URL: https://${DEMO_DOMAIN}
+      MQTT_PROXY: "1"
+      TRUST_PROXY: "1"
+      MES_PUBLIC_URL: https://mes.${DEMO_DOMAIN}
+      GRAFANA_PUBLIC_URL: https://grafana.${DEMO_DOMAIN}
+      EMQX_PUBLIC_URL: https://emqx.${DEMO_DOMAIN}
+      NEURON_1_PUBLIC_URL: https://neuron-1.${DEMO_DOMAIN}
+      NEURON_2_PUBLIC_URL: https://neuron-2.${DEMO_DOMAIN}
+      NEURON_3_PUBLIC_URL: https://neuron-3.${DEMO_DOMAIN}
+volumes:
+  caddy-data:
+  caddy-config:

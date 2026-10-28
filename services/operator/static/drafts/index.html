@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Factory demo · Layout drafts</title>
+  <link rel="stylesheet" href="drafts.css">
+  <script defer src="drafts.js"></script>
+</head>
+<body>
+  <nav class="draft-bar" aria-label="Layout drafts">
+    <span class="draft-label">Page drafts</span>
+    <a href="/" data-variant="a">A <span>Device controls ↗</span></a>
+    <a href="?v=b" data-variant="b">B <span>Shared tray</span></a>
+    <a href="?v=c" data-variant="c">C <span>Command composer</span></a>
+    <span class="draft-note">UI preview · sample data</span>
+  </nav>
+  <header class="masthead">
+    <a class="brand" href="/"><img src="../brands/emq.svg" alt="EMQ" width="73" height="22"></a>
+    <h1>Connected factory</h1>
+    <p id="draft-description"></p>
+    <div class="header-actions">
+      <span class="connection"><i></i>Demo preview</span>
+      <a href="/uns" target="_blank" rel="noopener">Namespace ↗</a>
+      <button popovertarget="tools" class="quiet">Tools ⌄</button>
+    </div>
+  </header>
+  <main class="stage" id="draft-stage"></main>
+  <div class="tools-popover" id="tools" popover>
+    <a href="http://localhost:18083/" target="_blank" rel="noopener">EMQX Enterprise ↗</a>
+    <a href="http://localhost:8090/" target="_blank" rel="noopener">MES ↗</a>
+    <a href="http://localhost:8085/" target="_blank" rel="noopener">Neuron 01 ↗</a>
+    <a href="http://localhost:8086/" target="_blank" rel="noopener">Neuron 02 ↗</a>
+    <a href="http://localhost:8087/" target="_blank" rel="noopener">Neuron 03 ↗</a>
+    <a href="http://localhost:3000/" target="_blank" rel="noopener">Analytics ↗</a>
+  </div>
+  <div class="filter-popover" id="topic-filters" popover>
+    <h2>Subscription topic filters</h2>
+    <div id="filter-list"></div>
+  </div>
+  <div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

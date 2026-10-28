@@ -30,6 +30,10 @@ import sys
 import time
 
 import httpx
+from init_security import load_env
+
+for _key, _value in load_env().items():
+    os.environ.setdefault(_key, _value)
 
 
 ENTERPRISE = os.getenv("ENTERPRISE", "acme-mfg")
@@ -77,6 +81,8 @@ TELEMETRY_TAGS = [
     ("fault_action",     "2!18", 13, 3),
     ("fault_type",       "2!19", 13, 3),
     ("fault_seq",        "2!20", 13, 3),
+    ("manual_rpm",       "2!22", 10, 3),
+    ("manual_until",     "2!23", 10, 3),
     # Composite event tag (read-only here; PLC writes the JSON snapshot).
     ("phase_event_json", "2!21", 13, 1),
 ]
@@ -110,6 +116,7 @@ HVAC_TAGS = [
 
 
 def login(base: str, user: str = "admin", password: str = "0000") -> str:
+    password = os.getenv("NEURON_ADMIN_PASSWORD", password)
     deadline = time.time() + 60
     last_err: Exception | None = None
     while time.time() < deadline:
@@ -223,6 +230,7 @@ def setup_group(c: httpx.Client, driver: str, group: str, tags: list) -> None:
 
 def setup_mqtt_app(c: httpx.Client, client_id: str, write_req_topic: str,
                    write_resp_topic: str) -> None:
+    number = {"neuron-plc-1": 1, "neuron-plc-2": 2, "neuron-hvac-1": 3}[client_id]
     body = call(c, "POST", "/api/neuron/node",
                 json={"name": APP, "plugin": "MQTT"})
     maybe_exists(body, f"create app {APP}")
@@ -232,12 +240,15 @@ def setup_mqtt_app(c: httpx.Client, client_id: str, write_req_topic: str,
             "name": APP, "plugin": "MQTT",
             "client-id": client_id,
             "host": "emqx", "port": 1883,
-            "username": "", "password": "",
+            "username": f"neuron-{number}", "password": os.environ[f"MQTT_NEURON_{number}_PASSWORD"],
             "ssl": False, "qos": 1, "version": 5, "format": 0,
             "cache": False, "cache-mem-size": 0, "cache-disk-size": 0,
             "cache-sync-interval": 100,
             "write-req-topic":  write_req_topic,
             "write-resp-topic": write_resp_topic,
+            # Neuron 4 also subscribes to driver read/write/action topics.
+            "enable_topic": True,
+            "driver-topic-prefix": write_req_topic.rsplit("/cmd/req", 1)[0] + "/_neuron",
         },
     })
 

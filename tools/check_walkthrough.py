@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from init_security import load_env
 
 
 def main():
@@ -22,7 +23,8 @@ def main():
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
     def request(path, data=None):
-        headers = {"Content-Type": "application/json", "Origin": base}
+        headers = {"Content-Type": "application/json", "Origin": base,
+                   "X-Demo-Admin": os.getenv("DEMO_ADMIN_KEY", load_env().get("DEMO_ADMIN_KEY", ""))}
         req = urllib.request.Request(base + path, data=None if data is None else json.dumps(data).encode(), headers=headers)
         with opener.open(req, timeout=8) as response:
             return json.load(response)

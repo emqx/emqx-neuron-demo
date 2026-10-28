@@ -7,9 +7,9 @@ datasources:
     access: proxy
     url: timescaledb:5432
     database: demo
-    user: demo
+    user: grafana_reader
     secureJsonData:
-      password: demo
+      password: $GRAFANA_DB_PASSWORD
     jsonData:
       database: demo
       sslmode: disable

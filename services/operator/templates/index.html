@@ -69,12 +69,13 @@
       <img src="/static/architecture.svg" alt="Architecture diagram">
     </div>
 
+    <p>EMQX and Neuron viewer login: <strong>viewer</strong> / <strong>demo-viewer</strong>. These accounts can inspect the demo but cannot change its configuration.</p>
     <table>
       <thead><tr><th>Service</th><th>URL</th><th>Notes</th></tr></thead>
       <tbody>
         <tr><td>Operator console</td><td class="mono"><a href="/console">Open console</a></td><td><span class="pill-tag">primary</span> place orders · fault injection</td></tr>
         <tr><td>Live UNS</td><td class="mono"><a href="/uns">Browse namespace</a></td><td>live topic tree · MQTT-over-WebSocket to EMQX Enterprise</td></tr>
-        <tr><td>MES web UI</td><td class="mono"><a href="{{ links.mes }}" target="_blank" rel="noopener">Open MES</a></td><td>batches in flight · HOLD / RESUME / ABORT</td></tr>
+        <tr><td>MES web UI</td><td class="mono"><a href="{{ links.mes }}" target="_blank" rel="noopener">Open MES</a></td><td>read-only batch history · controls are in the operator console during your turn</td></tr>
         <tr><td>Grafana · machining</td><td class="mono"><a href="{{ links.grafana }}d/production-overview" target="_blank" rel="noopener">Open production dashboard</a></td><td>live PLC-fleet telemetry (OPC UA)</td></tr>
         <tr><td>Grafana · HVAC</td><td class="mono"><a href="{{ links.grafana }}d/facility-hvac" target="_blank" rel="noopener">Open HVAC dashboard</a></td><td><span class="pill-tag">BACnet</span> facility AHU temps · setpoint · fan</td></tr>
         <tr><td>EMQX Enterprise dashboard</td><td class="mono"><a href="{{ links.emqx }}" target="_blank" rel="noopener">Open EMQX Enterprise dashboard</a></td><td>broker · rules · sinks</td></tr>

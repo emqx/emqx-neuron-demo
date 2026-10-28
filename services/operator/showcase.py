@@ -43,6 +43,9 @@ class Showcase:
         self.stop = threading.Event()
         self.worker = None
         self.scene = self.idle_scene()
+        self.recipe = "program-a"
+        self.guided = True
+        self.next_order = None
 
     @staticmethod
     def idle_scene():
@@ -95,6 +98,13 @@ class Showcase:
                 if valid and not retained:
                     self.activity["acquisition"] = now
                     self.activity[f"acquisition:{asset}"] = now
+                    # Restore lifecycle state after a broker restart without
+                    # fabricating an on-change machine event.
+                    if asset != "hvac-1" and all(isinstance(values.get(k), str) for k in ("phase_state", "current_batch_id", "current_phase")):
+                        self.plcs[asset] = {"plc_id": asset, "state": values["phase_state"],
+                                            "batch_id": values["current_batch_id"], "phase": values["current_phase"],
+                                            "reason": values.get("state_reason", ""),
+                                            "ts": datetime.now(timezone.utc).isoformat()}
                 return
             if len(parts) == 6 and parts[-1] == "state-events":
                 values = body.get("values", {})
@@ -146,6 +156,9 @@ class Showcase:
                 self.activity["commands"] = now
                 self.activity[f"commands:{parts[4]}"] = now
                 self.event("MES → machine", f"{body.get('action', '')} · {body.get('phase', '')}", "command")
+            if len(parts) == 7 and parts[-2:] == ["cmd", "req"] and not retained:
+                self.activity["commands"] = now
+                self.activity[f"commands:{parts[4]}"] = now
 
     def snapshot(self):
         now = time.time()
@@ -183,7 +196,36 @@ class Showcase:
         self.send(f"{self.machine_prefix}/{plc_id}/_demo/fault",
                   {"action": action, "type": "over_temp"})
 
-    def start(self, loop=False):
+    def available(self):
+        with self.lock:
+            return (self.snapshot()["ready"] and not (self.worker and self.worker.is_alive())
+                    and all(self.plcs.get(key, {}).get("state") in ("idle", "completed", "aborted") for key in ("plc-1", "plc-2"))
+                    and (not self.owned_order or self.orders.get(self.owned_order, {}).get("state") in ("completed", "failed")))
+
+    def stop_loop(self):
+        with self.lock:
+            self.scene["loop"] = False
+
+    def command(self, action, batch_id, phase, plc_id=None):
+        with self.lock:
+            order = self.orders.get(self.owned_order, {})
+            machine = order.get("plc_id")
+            plc = self.plcs.get(machine, {})
+            if (not self.scene["active"] or not self.snapshot()["ready"] or order.get("state") != "running"
+                    or not batch_id or batch_id != order.get("batch_id") or batch_id != plc.get("batch_id")
+                    or phase != plc.get("phase") or (plc_id and machine != plc_id)):
+                raise ValueError("The order or phase changed. Refresh before using this control.")
+            expected = {"hold": ("running",), "resume": ("holding",), "abort": ("running", "holding", "faulted"),
+                        "inject": ("running",), "clear": ("faulted",)}
+            if action not in expected or plc.get("state") not in expected[action]:
+                raise ValueError("The machine is not ready for that action.")
+            if action in ("inject", "clear"):
+                self.fault(action)
+            else:
+                self.send(f"{self.machine_prefix}/{machine}/batch/{batch_id}/phase/{phase}/command",
+                          {"action": action, "batch_id": batch_id, "phase": phase})
+
+    def start(self, loop=False, recipe="program-a", guided=True, order_id=None):
         with self.lock:
             if self.worker and self.worker.is_alive():
                 raise ValueError("A walkthrough is already running. Reset it before starting again.")
@@ -194,6 +236,8 @@ class Showcase:
             if self.owned_order and self.orders.get(self.owned_order, {}).get("state") not in ("completed", "failed"):
                 raise ValueError("The previous order still needs recovery. Use Reset walkthrough.")
             self.stop.clear()
+            self.recipe, self.guided, self.next_order = recipe, guided, order_id
+            self.owned_order = order_id
             self.scene = self.idle_scene()
             self.scene.update(active=True, loop=bool(loop))
             self.worker = threading.Thread(target=self.run, name="booth-walkthrough", daemon=True)
@@ -231,6 +275,10 @@ class Showcase:
         """Use the normal MQTT command path; retry across phase-boundary races."""
         if not self.owned_order:
             return
+        # Also cancel a pending/not-yet-observed order. MES persists the
+        # cancellation, so a delayed delivery cannot start it later.
+        self.send(f"{self.prefix}/orders/{self.owned_order}",
+                  {"order_id": self.owned_order, "cancel": True})
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             with self.lock:
@@ -268,19 +316,25 @@ class Showcase:
         self.pause(5)
         if not self.snapshot()["ready"]:
             raise RuntimeError("Source data is stale. Restore the connections before starting an order.")
-        order_id = f"BOOTH-{uuid.uuid4().hex[:12]}"
+        order_id = self.next_order or f"BOOTH-{uuid.uuid4().hex[:12]}"
         with self.lock:
             self.owned_order = order_id
             self.scene["order_id"] = order_id
         self.set_scene("order", "An order becomes machine activity.",
                        "The MES sends phase commands through EMQX Enterprise and EMQX Neuron. The simulated CNC executes them over OPC UA.")
         self.send(f"{self.prefix}/orders/{order_id}",
-                  {"order_id": order_id, "recipe_id": "program-a", "qty": 1,
-                   "placed_at": datetime.now(timezone.utc).isoformat()}, retain=True)
+                  {"order_id": order_id, "recipe_id": self.recipe, "qty": 1,
+                   "expires_at": time.time() + 20,
+                   "placed_at": datetime.now(timezone.utc).isoformat()})
         order = self.wait_for(lambda: self.orders.get(order_id, {}).get("state") == "running" and self.orders[order_id], 15, "MES dispatch")
         with self.lock:
             self.scene["plc_id"] = order["plc_id"]
         plc_id = order["plc_id"]
+        if not self.guided:
+            self.set_scene("order", "Your order is running", "Use the controls during your turn, or watch the order finish.")
+            self.wait_for(lambda: self.orders.get(order_id, {}).get("state") == "completed", 85, "order completion")
+            self.set_scene("complete", "Your order is complete", "The factory is ready for the next visitor.")
+            return
         self.wait_for(lambda: self.plcs.get(plc_id, {}).get("phase") == "rough" and self.plcs[plc_id].get("state") == "running", 20, "the machining phase")
         self.set_scene("share", "Add an application. Reuse the same data.",
                        "The new dashboard opens its own MQTT connection. Existing retained values arrive first, followed by live updates.",

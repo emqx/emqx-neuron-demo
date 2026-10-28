@@ -1,3 +1,35 @@
+include "/opt/emqx/etc/demo-ws-auth.hocon"
+
+authentication = [{
+  mechanism = password_based
+  backend = built_in_database
+  user_id_type = username
+  password_hash_algorithm { name = sha256, salt_position = suffix }
+  bootstrap_file = "/opt/emqx/etc/demo-users.csv"
+  bootstrap_type = plain
+}]
+authorization {
+  no_match = deny
+  deny_action = disconnect
+  sources = [{type = file, enable = true, path = "/opt/emqx/etc/demo-acl.conf"}]
+}
+listeners.ws.default {
+  bind = "0.0.0.0:8083"
+  max_connections = 200
+}
+listeners.tcp.default.max_connections = 100
+listeners.ssl.default.enable = false
+listeners.wss.default.enable = false
+mqtt {
+  max_packet_size = "64KB"
+  max_subscriptions = 24
+  max_session_expiry_interval = "10m"
+}
+retainer {
+  msg_expiry_interval = "1d"
+  backend.max_retained_messages = 10000
+}
+
 dashboard {
   # This file replaces the image's base.hocon, so declare the dashboard
   # listener explicitly instead of relying on the image's defaults.

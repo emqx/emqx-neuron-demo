@@ -59,6 +59,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import math
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -172,10 +173,12 @@ def main() -> None:
         "fault_type":        var(19, "fault_type",       ""),
         "fault_seq":         var(20, "fault_seq",        ""),
         "phase_event_json":  var(21, "phase_event_json", ""),
+        "manual_rpm":        var(22, "manual_rpm", 0.0),
+        "manual_until":      var(23, "manual_until", 0.0),
     }
     # Mark writable: clients (Neuron) can write; PLC still reads via own API.
     for tag in ("command_action", "command_phase", "command_batch_id", "command_seq",
-                "fault_action", "fault_type", "fault_seq"):
+                "fault_action", "fault_type", "fault_seq", "manual_rpm", "manual_until"):
         nodes[tag].set_writable()
 
     server.start()
@@ -354,6 +357,15 @@ def main() -> None:
                 state_str = "faulted"
             else:  # IDLE
                 values = sample("idle", 0, 1, coolant_carry)
+                # Manual spindle tests are independent of MES phase execution.
+                # The deadline is enforced by the PLC even if the web app dies.
+                rpm = nodes["manual_rpm"].get_value()
+                until = nodes["manual_until"].get_value()
+                if (type(rpm) in (int, float) and type(until) in (int, float)
+                        and math.isfinite(rpm) and math.isfinite(until)
+                        and 0 <= rpm <= 6000 and time.time() < until <= time.time() + 60):
+                    values["spindle_rpm"] = float(rpm)
+                    values["power_kw"] = round(0.25 + rpm / 1500, 2)
                 last_values = values
                 state_str = "idle"
                 # Do not immediately overwrite a terminal lifecycle event.
