@@ -15,5 +15,5 @@ The remaining B and C previews use local sample data. Claims, commands, telemetr
 are simulated in the browser. They do not connect to the broker or control
 the running demo. Product-screen links open the existing local services.
 
-Both appliance drawings are copied from the original showcase template.
+Both appliance drawings are copied from the original demo template.
 Logos and fonts reuse the project's existing brand assets.

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services/operator"))
 from visitors import Refused, Limiter
 from control import DeviceControl
-from showcase import Showcase
+from demo import Demo
 
 
 class PublicApiTests(unittest.TestCase):
@@ -91,7 +91,7 @@ class PublicApiTests(unittest.TestCase):
         self.assertEqual(claims["acl"][-1]["permission"], "deny")
 
     def test_stale_phase_and_foreign_batch_never_publish(self):
-        demo = Showcase(Mock(), "acme", "plant", "machining", "line")
+        demo = Demo(Mock(), "acme", "plant", "machining", "line")
         demo.snapshot = lambda: {"ready": True}
         demo.scene.update(active=True, plc_id="plc-1")
         demo.owned_order = "O-one"

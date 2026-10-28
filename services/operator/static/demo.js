@@ -311,7 +311,7 @@ function paintTraffic() {
 
 async function connectTraffic() {
   try {
-    mqttClient = await demoMqttConnect(config, 'showcase');
+    mqttClient = await demoMqttConnect(config, 'demo');
     function subscribe() {
       viewerPhase = 'connected';
       const filters = [...commandFilters, telemetryFilter];
@@ -382,7 +382,7 @@ setInterval(() => {
 
 async function poll() {
   try {
-    const response = await fetch('/api/showcase', {cache: 'no-store', signal: AbortSignal.timeout(4500)});
+    const response = await fetch('/api/demo/state', {cache: 'no-store', signal: AbortSignal.timeout(4500)});
     if (!response.ok) throw new Error('Factory connection unavailable');
     pollConnected = true;
     render(await response.json());

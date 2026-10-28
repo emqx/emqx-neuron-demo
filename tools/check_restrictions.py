@@ -29,7 +29,7 @@ def main():
     prefix = prefix["enterprise"] + "/" + prefix["site"]
 
     def state(client):
-        response = client.get("/api/showcase")
+        response = client.get("/api/demo/state")
         response.raise_for_status()
         return response.json()
 

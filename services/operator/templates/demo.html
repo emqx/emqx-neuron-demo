@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Control simulated devices and follow their live MQTT traffic.">
   <title>{{ demo_config.title }} · EMQX</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='showcase.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='demo.css') }}">
   <script id="demo-config" type="application/json">{{ demo_config | tojson }}</script>
   <script defer src="{{ url_for('static', filename='vendor/mqtt.min.js') }}"></script>
   <script defer src="{{ url_for('static', filename='connection.js') }}"></script>
-  <script defer src="{{ url_for('static', filename='showcase-model.js') }}"></script>
-  <script defer src="{{ url_for('static', filename='showcase.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='demo-model.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='demo.js') }}"></script>
 </head>
 <body>
   <header class="masthead">
@@ -32,7 +32,7 @@
   </header>
   <div class="notice" id="notice" role="alert" hidden><span id="notice-message"></span><button id="dismiss-notice" aria-label="Dismiss message">×</button></div>
   <p class="sr-only" id="announcements" role="status" aria-atomic="true"></p>
-  <main class="showcase-layout">
+  <main class="demo-layout">
     <section class="factory" aria-label="Factory controls">
       <div class="applications">
         <form id="order-form" aria-label="ERP batch order">

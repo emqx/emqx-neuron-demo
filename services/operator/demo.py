@@ -19,7 +19,7 @@ class Cancelled(Exception):
     pass
 
 
-class Showcase:
+class Demo:
     FRESH_SECONDS = 6
 
     def __init__(self, publish, enterprise, site, area, line):

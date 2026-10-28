@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const {EventEmitter} = require('node:events');
-const UI = require('../services/operator/static/showcase-model.js');
+const UI = require('../services/operator/static/demo-model.js');
 
 const available = {mine:false, owned:false, busy:false, stage:'available', remaining:0, position:null, waiting:0, capacity:3};
 const context = {connected:true, fresh:true, currentRequest:null, seconds:30};
@@ -83,7 +83,7 @@ test('a taken-over viewer yields its bounded connection until Watch here is requ
     setTimeout:fn => { timers.set(++nextTimer, fn); return nextTimer; }, clearTimeout:id => timers.delete(id)};
   scope.window = scope;
   vm.runInNewContext(fs.readFileSync('services/operator/static/connection.js', 'utf8'), scope);
-  await scope.demoMqttConnect({}, 'showcase');
+  await scope.demoMqttConnect({}, 'demo');
   let standby = false;
   client.on('viewer-standby', () => { standby = true; });
   client.emit('disconnect', {reasonCode:0x8e});

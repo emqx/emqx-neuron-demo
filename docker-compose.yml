@@ -148,8 +148,7 @@ services:
       CLAIM_SECONDS: ${CLAIM_SECONDS:-30}
       BATCH_SECONDS: ${BATCH_SECONDS:-90}
       DEVICE_QUEUE_SIZE: ${DEVICE_QUEUE_SIZE:-3}
-      SHOWCASE_TITLE: ${SHOWCASE_TITLE:-From shop floor to cloud.}
-      SHOWCASE_EVENT: ${SHOWCASE_EVENT:-Live manufacturing demonstration}
+      DEMO_TITLE: ${DEMO_TITLE:-From shop floor to cloud.}
     volumes:
       - visitor-data:/data
       - ./.runtime/mqtt-signing-key.pem:/run/secrets/mqtt-signing-key.pem:ro

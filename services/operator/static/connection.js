@@ -1,4 +1,4 @@
-/* Shared by the namespace view and the independent showcase subscriber. */
+/* Shared by the namespace view and the independent demo subscriber. */
 window.demoConnection = function (config) {
   if (config.mqttUrl) return config.mqttUrl;
   if (config.mqttProxy || location.protocol === 'https:') {

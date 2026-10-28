@@ -40,7 +40,7 @@ def main():
         deadline = time.monotonic() + timeout
         previous = None
         while time.monotonic() < deadline:
-            state = request("/api/showcase")
+            state = request("/api/demo/state")
             scene = state["scene"]
             key = (scene["iteration"], scene["step"])
             if key != previous:
@@ -53,7 +53,7 @@ def main():
             time.sleep(0.4)
         raise TimeoutError("The expected walkthrough transition did not arrive.")
 
-    state = request("/api/showcase")
+    state = request("/api/demo/state")
     if state["scene"]["active"]:
         raise RuntimeError("A walkthrough is already active; leave it undisturbed and retry later.")
     wait_for(lambda s: s["ready"], 30)

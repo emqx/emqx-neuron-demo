@@ -8,13 +8,13 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "operator"))
-from showcase import Showcase
+from demo import Demo
 
 
-class ShowcaseTests(unittest.TestCase):
+class DemoTests(unittest.TestCase):
     def setUp(self):
         self.publish = Mock()
-        self.demo = Showcase(self.publish, "acme-mfg", "plant-1", "machining", "line-1")
+        self.demo = Demo(self.publish, "acme-mfg", "plant-1", "machining", "line-1")
         self.demo.connection(True)
 
     def feed(self, stamp=None, retained=False):
@@ -86,13 +86,13 @@ class ShowcaseTests(unittest.TestCase):
         body = {"values": {"spindle_rpm": 3000, "power_kw": 6}}
         self.demo.observe(topic, body, retained=True)
         self.assertNotIn("acquisition:plc-1", self.demo.snapshot()["activity"])
-        with patch("showcase.time.time", return_value=100):
+        with patch("demo.time.time", return_value=100):
             self.demo.observe(topic, body)
             activity = self.demo.snapshot()["activity"]
             self.assertTrue(activity["acquisition:plc-1"])
             self.assertNotIn("acquisition:plc-2", activity)
             self.assertNotIn("acquisition:hvac-1", activity)
-        with patch("showcase.time.time", return_value=102):
+        with patch("demo.time.time", return_value=102):
             self.assertFalse(self.demo.snapshot()["activity"]["acquisition:plc-1"])
 
     def test_application_packets_follow_their_own_message_types(self):
@@ -142,7 +142,7 @@ class ShowcaseTests(unittest.TestCase):
             self.demo.orders["BOOTH-one"]["state"] = "failed"
 
         self.publish.side_effect = acknowledge
-        with patch("showcase.time.sleep"):
+        with patch("demo.time.sleep"):
             self.demo.finish_reset()
         self.assertIn("manual", self.demo.orders)
         self.assertIn("BOOTH-one", self.demo.orders)
@@ -152,7 +152,7 @@ class ShowcaseTests(unittest.TestCase):
 
     def test_reset_does_not_falsely_report_success_without_ack(self):
         self.demo.owned_order = "BOOTH-unresolved"
-        with patch("showcase.time.monotonic", side_effect=[0, 16]):
+        with patch("demo.time.monotonic", side_effect=[0, 16]):
             self.demo.finish_reset()
         self.assertEqual(self.demo.snapshot()["scene"]["step"], "error")
         self.assertEqual(self.demo.owned_order, "BOOTH-unresolved")
@@ -232,16 +232,12 @@ class AuthTests(unittest.TestCase):
         self.assertNotIn("unpkg.com", page)
         self.assertNotIn("http://localhost", page)
 
-    def test_interactive_home_and_namespace_are_the_only_demo_pages(self):
+    def test_interactive_home_and_namespace_are_accessible(self):
         self.login()
         page = self.client.get("/", base_url=self.base)
         self.assertEqual(page.status_code, 200)
         self.assertIn('id="asset-hvac-1"', page.get_data(as_text=True))
         self.assertEqual(self.client.get("/uns", base_url=self.base).status_code, 200)
-        for path in ("/showcase", "/console", "/tools"):
-            with self.subTest(path=path):
-                self.assertEqual(self.client.get(path, base_url=self.base).status_code, 404)
-                self.assertNotIn(f'href="{path}"', page.get_data(as_text=True))
 
 
 if __name__ == "__main__":

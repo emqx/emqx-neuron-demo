@@ -40,4 +40,4 @@ check-restrictions:  ## Exercise separate visitors and live broker/product/datab
 	uv run tools/check_restrictions.py
 
 check-ui:  ## Check UI states and bounded-viewer handoff (Node 18+)
-	node --test tests/showcase-ui.test.cjs
+	node --test tests/demo-ui.test.cjs

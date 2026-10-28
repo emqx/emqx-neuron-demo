@@ -26,8 +26,7 @@ def main():
         parser.error("Passwords did not match.")
     content = (f"DEMO_DOMAIN={args.domain}\n"
                f"DEMO_PASSWORD_HASH='{generate_password_hash(password)}'\n"
-               f"DEMO_SESSION_SECRET={secrets.token_hex(32)}\n"
-               "SHOWCASE_EVENT='Florence · Manufacturing Forum'\n")
+               f"DEMO_SESSION_SECRET={secrets.token_hex(32)}\n")
     try:
         fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:

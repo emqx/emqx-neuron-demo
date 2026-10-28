@@ -208,7 +208,7 @@ curl -i http://localhost:8080/readyz
 
 ## Configuration
 
-Use `.env` for shared configuration. `SHOWCASE_TITLE` changes the browser-tab
+Use `.env` for shared configuration. `DEMO_TITLE` changes the browser-tab
 title. `ENTERPRISE`, `SITE` and `LINE` set the MQTT namespace, with defaults
 `acme-mfg`, `plant-1` and `line-1`. CNCs use the fixed area `machining`;
 HVAC uses `utilities/compressor-room` to match the broker rules and controls.

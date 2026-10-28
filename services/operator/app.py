@@ -7,7 +7,7 @@
 Routes:
     /          — live factory map, device claims, ERP orders and MQTT traffic
     /uns       — live MQTT-topic tree (connects to EMQX WS directly)
-    /api/*     — operator and showcase controls
+    /api/*     — operator and demo controls
     /login     — optional hosted session login
     /auth/check — gateway authentication for HTTP and WebSocket handshakes
 
@@ -32,7 +32,7 @@ from urllib.parse import urlsplit, urlencode
 from flask import Flask, jsonify, render_template, request, redirect, session, g
 from werkzeug.security import check_password_hash
 from waitress import serve
-from showcase import Showcase
+from demo import Demo
 from visitors import Limiter, Refused
 from control import DeviceControl
 import paho.mqtt.client as mqtt
@@ -71,7 +71,7 @@ plcs: dict[str, dict] = {}       # plc_id -> latest state payload
 
 
 def on_connect(client, _u, _f, reason_code, _p):
-    showcase.connection(reason_code == 0)
+    demo.connection(reason_code == 0)
     if reason_code == 0:
         client.subscribe(f"{ENTERPRISE}/{SITE}/#", qos=1)
         print(f"[{utc_now()}] MQTT connected; subs: orders status + PLC state",
@@ -88,7 +88,7 @@ def on_message(_c, _u, msg):
 
     if not isinstance(body, dict):
         return
-    showcase.observe(msg.topic, body, retained=msg.retain)
+    demo.observe(msg.topic, body, retained=msg.retain)
     controls.observe(msg.topic, body, retained=msg.retain)
 
     m = ORDER_STATUS_RE.match(msg.topic)
@@ -127,7 +127,7 @@ client = mqtt.Client(
 )
 client.on_connect = on_connect
 client.on_message = on_message
-client.on_disconnect = lambda *_: showcase.connection(False)
+client.on_disconnect = lambda *_: demo.connection(False)
 client.reconnect_delay_set(min_delay=1, max_delay=5)
 if os.getenv("MQTT_USERNAME"):
     client.username_pw_set(os.environ["MQTT_USERNAME"], os.environ["MQTT_PASSWORD"])
@@ -142,8 +142,8 @@ def publish(topic, payload, qos=1, retain=False):
     return info
 
 
-showcase = Showcase(publish, ENTERPRISE, SITE, AREA, LINE)
-controls = DeviceControl(showcase, os.getenv("VISITOR_DB", ":memory:"),
+demo = Demo(publish, ENTERPRISE, SITE, AREA, LINE)
+controls = DeviceControl(demo, os.getenv("VISITOR_DB", ":memory:"),
                          seconds=int(os.getenv("CLAIM_SECONDS", "30")),
                          batch_seconds=int(os.getenv("BATCH_SECONDS", "90")),
                          capacity=int(os.getenv("DEVICE_QUEUE_SIZE", "3")))
@@ -279,8 +279,8 @@ def mqtt_credentials():
     http_limits.take(("mqtt", request.remote_addr), 60, 60)
     if not JWT_PRIVATE_KEY:
         return jsonify(error="MQTT viewer authentication is not configured."), 503
-    slot = request.args.get("slot", "showcase")
-    if slot not in ("showcase", "uns", "test"):
+    slot = request.args.get("slot", "demo")
+    if slot not in ("demo", "uns", "test"):
         return jsonify(error="Unknown subscriber."), 400
     client_id = "visitor-" + session["visitor"] + "-" + slot
     # A fixed client ID per visitor/view bounds connections and prevents the
@@ -359,21 +359,20 @@ def template_config():
         "machinePrefix": f"{ENTERPRISE}/{SITE}/{AREA}/{LINE}",
         "mqttUrl": os.getenv("MQTT_PUBLIC_URL", ""),
         "mqttProxy": os.getenv("MQTT_PROXY", "0") == "1",
-        "title": os.getenv("SHOWCASE_TITLE", "From shop floor to cloud."),
-        "event": os.getenv("SHOWCASE_EVENT", "Live manufacturing demonstration"),
+        "title": os.getenv("DEMO_TITLE", "From shop floor to cloud."),
     }}
 
 
-@app.get("/api/showcase")
-def showcase_state():
-    with showcase.lock:
-        recent_orders = sorted(showcase.orders.values(), key=lambda order: order.get("ts", ""))[-12:]
-    return jsonify(**showcase.snapshot(), orders=recent_orders, visitor=visitor_state())
+@app.get("/api/demo/state")
+def demo_state():
+    with demo.lock:
+        recent_orders = sorted(demo.orders.values(), key=lambda order: order.get("ts", ""))[-12:]
+    return jsonify(**demo.snapshot(), orders=recent_orders, visitor=visitor_state())
 
 
 @app.get("/readyz")
 def readyz():
-    state = showcase.snapshot()
+    state = demo.snapshot()
     return jsonify(ready=state["ready"], connected=state["connected"]), 200 if state["ready"] else 503
 
 
@@ -387,7 +386,7 @@ def demo_start():
     if controls.active or any(controls.waiting.values()):
         return jsonify(error="Wait for device claims to finish before starting an operator loop."), 409
     try:
-        showcase.start(loop=body.get("loop", False))
+        demo.start(loop=body.get("loop", False))
     except ValueError as exc:
         return jsonify(error=str(exc)), 409
     return jsonify(status="started"), 202
@@ -400,7 +399,7 @@ def demo_reset():
             for ticket in controls.active.values():
                 ticket.update(stage="recovering", pending=None)
             controls.save()
-        showcase.reset()
+        demo.reset()
     else:
         return jsonify(error="Release your device using its claim controls."), 403
     return jsonify(status="resetting"), 202
@@ -413,7 +412,7 @@ def demo_fault():
         return jsonify(error="Send an action."), 400
     try:
         if g.admin:
-            showcase.fault(body.get("action"))
+            demo.fault(body.get("action"))
         else:
             return jsonify(error="Use the controls on your reserved device."), 403
     except ValueError as exc:
@@ -436,7 +435,7 @@ def api_state():
             key=lambda o: o.get("ts", ""),
             reverse=True,
         )
-    plc_list = sorted(showcase.snapshot()["plcs"].values(), key=lambda c: c.get("plc_id", ""))
+    plc_list = sorted(demo.snapshot()["plcs"].values(), key=lambda c: c.get("plc_id", ""))
     return jsonify({
         "enterprise": ENTERPRISE,
         "site": SITE,
@@ -502,7 +501,7 @@ def uns():
 
 @app.get("/")
 def index():
-    return render_template("showcase.html")
+    return render_template("demo.html")
 
 
 def main() -> None:

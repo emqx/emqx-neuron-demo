@@ -5,7 +5,7 @@
 They are the company wordmark, EMQX product mark, and EMQX Neuron product mark
 used by that site's header and brand resources page.
 
-The showcase follows `DESIGN.md` and `assets/css/tailwind.css` from that
+The demo follows `DESIGN.md` and `assets/css/tailwind.css` from that
 repository: primary purple `#5e4eff`, Neuron blue `#189bfe`, and neutral
 surfaces and typography. Green is reserved for actual live/success status.
 
